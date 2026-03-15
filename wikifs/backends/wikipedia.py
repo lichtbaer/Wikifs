@@ -7,6 +7,7 @@ import re
 import unicodedata
 from contextlib import nullcontext
 from html.parser import HTMLParser
+from typing import Any
 from urllib.parse import quote
 
 import requests
@@ -19,6 +20,7 @@ from wikifs.backends.wikipedia_models import (
 )
 from wikifs.cache import Cache
 from wikifs.config import ApiConfig
+from wikifs.errors import ErrorCollector
 from wikifs.tracing import TraceContext
 
 
@@ -30,6 +32,12 @@ class WikipediaError(Exception):
 
 class WikipediaNotFoundError(WikipediaError):
     """HTTP 404 — Article does not exist in this language."""
+
+    pass
+
+
+class WikipediaTimeoutError(WikipediaError):
+    """Request timeout."""
 
     pass
 
@@ -53,29 +61,84 @@ def _build_url(base: str, lang: str, path: str, title: str) -> str:
     return f"{url_base}/api/rest_v1/page/{path}/{encoded_title}"
 
 
+def _record_api_error(
+    error_collector: ErrorCollector | None,
+    ctx: TraceContext | None,
+    category: str,
+    severity: str,
+    message: str,
+    details: dict[str, Any],
+) -> None:
+    """Record error if collector and ctx available."""
+    if error_collector is None:
+        return
+    trace_id = ctx._trace_id if ctx else None
+    run_id = ctx._run_id if ctx else None
+    command = ctx._command if ctx else None
+    path = ctx._path if ctx else None
+    error_collector.record(
+        category=category,
+        severity=severity,
+        message=message,
+        details=details,
+        trace_id=trace_id,
+        run_id=run_id,
+        command=command,
+        path=path,
+    )
+
+
 def _http_get(
     url: str,
     config: ApiConfig,
     ctx: TraceContext | None = None,
     allow_redirect: bool = True,
+    error_collector: ErrorCollector | None = None,
 ) -> tuple[bytes, str]:
     """Perform HTTP GET. Returns (body, final_url). Follows redirects."""
     headers = {"User-Agent": config.user_agent}
     timeout = config.request_timeout_seconds
 
-    resp = requests.get(
-        url,
-        headers=headers,
-        timeout=timeout,
-        allow_redirects=allow_redirect,
-    )
+    try:
+        resp = requests.get(
+            url,
+            headers=headers,
+            timeout=timeout,
+            allow_redirects=allow_redirect,
+        )
+    except requests.Timeout as e:
+        _record_api_error(
+            error_collector,
+            ctx,
+            "timeout",
+            "error",
+            f"Request timeout: {url}",
+            {"url": url, "error": str(e)},
+        )
+        raise WikipediaTimeoutError(f"Request timeout: {url}") from e
 
     if resp.status_code == 404:
+        _record_api_error(
+            error_collector,
+            ctx,
+            "api",
+            "warning",
+            f"Article not found in this language: {url}",
+            {"url": url, "status_code": 404},
+        )
         raise WikipediaNotFoundError(
             f"Article not found in this language: {url}"
         ) from None
 
     if resp.status_code != 200:
+        _record_api_error(
+            error_collector,
+            ctx,
+            "api",
+            "error",
+            f"HTTP {resp.status_code}: {url}",
+            {"url": url, "status_code": resp.status_code},
+        )
         raise WikipediaError(f"HTTP {resp.status_code}: {url}") from None
 
     data: bytes = resp.content
@@ -191,9 +254,15 @@ def _word_count(text: str) -> int:
 class WikipediaClient:
     """Wikipedia API client with caching and trace integration."""
 
-    def __init__(self, config: ApiConfig, cache: Cache) -> None:
+    def __init__(
+        self,
+        config: ApiConfig,
+        cache: Cache,
+        error_collector: ErrorCollector | None = None,
+    ) -> None:
         self._config = config
         self._cache = cache
+        self._error_collector = error_collector
         self._base = config.wikipedia_base_url
 
     def get_summary(
@@ -219,7 +288,7 @@ class WikipediaClient:
         url = _build_url(self._base, lang, "summary", title)
         cm = ctx.phase("get_summary") if ctx else nullcontext()
         with cm:
-            data_bytes, _ = _http_get(url, self._config, ctx)
+            data_bytes, _ = _http_get(url, self._config, ctx, error_collector=self._error_collector)
         data = json.loads(data_bytes)
 
         # Handle redirects
@@ -287,7 +356,7 @@ class WikipediaClient:
         url = _build_url(self._base, lang, "html", title)
         cm = ctx.phase("get_article") if ctx else nullcontext()
         with cm:
-            html_bytes, _ = _http_get(url, self._config, ctx)
+            html_bytes, _ = _http_get(url, self._config, ctx, error_collector=self._error_collector)
         html = html_bytes.decode("utf-8", errors="replace")
 
         # Extract body content (skip head)

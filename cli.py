@@ -9,6 +9,7 @@ import click
 from wikifs import Interpreter, __version__, create_interpreter
 from wikifs.cache import Cache, CacheConfig, CacheStats
 from wikifs.config import load_config
+from wikifs.errors import ErrorStore, RunStore
 from wikifs.tracing import TraceStore
 
 
@@ -46,6 +47,20 @@ def _get_trace_store() -> TraceStore:
     config = load_config()
     db_path = config.get("tracing", {}).get("db_path", "~/.wikifs/traces.db")
     return TraceStore(str(db_path))
+
+
+def _get_error_store() -> ErrorStore:
+    """Get ErrorStore from config."""
+    config = load_config()
+    db_path = config.get("errors", {}).get("db_path", "~/.wikifs/errors.db")
+    return ErrorStore(str(db_path))
+
+
+def _get_run_store() -> RunStore:
+    """Get RunStore from config."""
+    config = load_config()
+    db_path = config.get("errors", {}).get("db_path", "~/.wikifs/errors.db")
+    return RunStore(str(db_path))
 
 
 @click.group()
@@ -189,6 +204,266 @@ def traces_clear(older_than: int | None) -> None:
     store = _get_trace_store()
     deleted = store.clear(older_than_days=older_than)
     click.echo(f"Deleted {deleted} trace(s).")
+
+
+@main.group(invoke_without_command=True)
+@click.option(
+    "--since",
+    type=str,
+    default=None,
+    help="Filter by time (e.g. 24h, 7d)",
+)
+@click.option(
+    "--category",
+    type=str,
+    default=None,
+    help="Filter by category (api, cache, parsing, routing, agent, timeout)",
+)
+@click.option(
+    "--unresolved",
+    "unresolved_only",
+    is_flag=True,
+    help="Show only unresolved errors",
+)
+@click.option(
+    "--run-id",
+    type=str,
+    default=None,
+    help="Filter by run ID",
+)
+@click.option(
+    "--format",
+    "fmt",
+    type=click.Choice(["json", "text"]),
+    default="text",
+    help="Output format",
+)
+@click.option("--limit", type=int, default=100, help="Max errors to show")
+@click.pass_context
+def errors(
+    ctx: click.Context,
+    since: str | None,
+    category: str | None,
+    unresolved_only: bool,
+    run_id: str | None,
+    fmt: str,
+    limit: int,
+) -> None:
+    """Show or export error data."""
+    if ctx.invoked_subcommand is not None:
+        return
+    store = _get_error_store()
+    entries = store.query(
+        since=since,
+        category=category,
+        unresolved_only=unresolved_only,
+        run_id=run_id,
+        limit=limit,
+    )
+    if fmt == "json":
+        import json
+
+        out = [
+            {
+                "error_id": e.error_id,
+                "timestamp": e.timestamp,
+                "trace_id": e.trace_id,
+                "run_id": e.run_id,
+                "category": e.category,
+                "severity": e.severity,
+                "command": e.command,
+                "path": e.path,
+                "message": e.message,
+                "details": e.details,
+                "resolved": e.resolved,
+            }
+            for e in entries
+        ]
+        click.echo(json.dumps(out, indent=2))
+    else:
+        for e in entries:
+            resolved = " [resolved]" if e.resolved else ""
+            click.echo(
+                f"{e.timestamp} | {e.category}/{e.severity}{resolved} | "
+                f"{e.message} | {e.error_id}"
+            )
+
+
+@errors.command("summary")
+def errors_summary() -> None:
+    """Show error aggregation by category and severity."""
+    store = _get_error_store()
+    summary = store.summary()
+    if not summary:
+        click.echo("No errors recorded.")
+        return
+    for cat, sev_counts in sorted(summary.items()):
+        for sev, cnt in sorted(sev_counts.items()):
+            click.echo(f"  {cat}/{sev}: {cnt}")
+
+
+@main.group(invoke_without_command=True)
+@click.option(
+    "--id",
+    "run_id",
+    type=str,
+    default=None,
+    help="Show single run by ID",
+)
+@click.option(
+    "--failed",
+    "failed_only",
+    is_flag=True,
+    help="Show only failed runs",
+)
+@click.option(
+    "--type",
+    "run_type",
+    type=click.Choice(["cli", "agent"]),
+    default=None,
+    help="Filter by run type",
+)
+@click.option(
+    "--since",
+    type=str,
+    default=None,
+    help="Filter by time (e.g. 24h, 7d)",
+)
+@click.option(
+    "--format",
+    "fmt",
+    type=click.Choice(["json", "text"]),
+    default="text",
+    help="Output format",
+)
+@click.option("--full", "full_report", is_flag=True, help="Include traces and errors (with --id)")
+@click.option("--limit", type=int, default=50, help="Max runs to show")
+@click.pass_context
+def runs(
+    ctx: click.Context,
+    run_id: str | None,
+    failed_only: bool,
+    run_type: str | None,
+    since: str | None,
+    fmt: str,
+    full_report: bool,
+    limit: int,
+) -> None:
+    """Show or export run data."""
+    if ctx.invoked_subcommand is not None:
+        return
+    if run_id:
+        _show_single_run(run_id, fmt, full_report)
+        return
+    store = _get_run_store()
+    entries = store.query(
+        failed_only=failed_only,
+        run_type=run_type,
+        since=since,
+        limit=limit,
+    )
+    if fmt == "json":
+        import json
+
+        out = [
+            {
+                "run_id": r.run_id,
+                "timestamp": r.timestamp,
+                "type": r.type,
+                "query": r.query,
+                "trace_ids": r.trace_ids,
+                "error_ids": r.error_ids,
+                "duration_ms": r.duration_ms,
+                "success": r.success,
+                "result": r.result,
+                "model": r.model,
+                "commands_count": r.commands_count,
+            }
+            for r in entries
+        ]
+        click.echo(json.dumps(out, indent=2))
+    else:
+        for r in entries:
+            status = "success" if r.success else "failed"
+            click.echo(
+                f"{r.timestamp} | {r.run_id} | {r.type} | {status} | "
+                f"{r.duration_ms:.0f}ms | {r.commands_count} cmds"
+            )
+
+
+def _show_single_run(run_id: str, fmt: str, full_report: bool) -> None:
+    """Show a single run by ID."""
+    import json
+
+    run_store = _get_run_store()
+    error_store = _get_error_store()
+    trace_store = _get_trace_store()
+
+    run = run_store.get_by_id(run_id)
+    if run is None:
+        click.echo(f"Run not found: {run_id}", err=True)
+        sys.exit(1)
+
+    report: dict[str, object]
+    if full_report:
+        traces = []
+        for tid in run.trace_ids:
+            t = trace_store.get_by_trace_id(tid)
+            if t:
+                traces.append(
+                    {
+                        "trace_id": t.trace_id,
+                        "command": t.command,
+                        "path": t.path,
+                        "timing_ms": t.total_duration_ms,
+                        "exit_code": t.exit_code,
+                    }
+                )
+        errors_list = []
+        for eid in run.error_ids:
+            e = error_store.get_by_id(eid)
+            if e:
+                errors_list.append(
+                    {
+                        "error_id": e.error_id,
+                        "category": e.category,
+                        "severity": e.severity,
+                        "message": e.message,
+                        "details": e.details,
+                    }
+                )
+        report = {
+            "run_id": run.run_id,
+            "type": run.type,
+            "query": run.query,
+            "model": run.model,
+            "success": run.success,
+            "duration_ms": run.duration_ms,
+            "commands_count": run.commands_count,
+            "result": run.result,
+            "traces": traces,
+            "errors": errors_list,
+        }
+    else:
+        report = {
+            "run_id": run.run_id,
+            "timestamp": run.timestamp,
+            "type": run.type,
+            "query": run.query,
+            "trace_ids": run.trace_ids,
+            "error_ids": run.error_ids,
+            "duration_ms": run.duration_ms,
+            "success": run.success,
+            "result": run.result,
+            "model": run.model,
+            "commands_count": run.commands_count,
+        }
+
+    if fmt == "json":
+        click.echo(json.dumps(report, indent=2))
+    else:
+        for k, v in report.items():
+            click.echo(f"  {k}: {v}")
 
 
 def _get_cache() -> Cache:

@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from wikifs.backends.wikidata import WikidataClient
 from wikifs.backends.wikipedia import WikipediaClient
 from wikifs.cache import Cache
 from wikifs.config import ApiConfig
+from wikifs.errors import ErrorCollector
 from wikifs.handlers.article import ArticleHandler
 from wikifs.handlers.classes import ClassesHandler
 from wikifs.handlers.entity import EntityHandler
@@ -15,9 +16,6 @@ from wikifs.handlers.properties import PropertiesHandler
 from wikifs.handlers.relations import RelationsHandler
 from wikifs.handlers.search import SearchHandler
 from wikifs.models import Handler, HandlerConfig
-
-if TYPE_CHECKING:
-    pass
 
 
 def create_handler_config(config_dict: dict[str, Any]) -> HandlerConfig:
@@ -36,10 +34,11 @@ def create_handlers(
     api_config: ApiConfig,
     cache: Cache,
     handler_config: HandlerConfig,
+    error_collector: ErrorCollector | None = None,
 ) -> dict[str, Handler]:
     """Create all handlers with shared dependencies."""
-    wikidata = WikidataClient(api_config, cache)
-    wikipedia = WikipediaClient(api_config, cache)
+    wikidata = WikidataClient(api_config, cache, error_collector)
+    wikipedia = WikipediaClient(api_config, cache, error_collector)
     entity = EntityHandler(wikidata, wikipedia, handler_config)
     properties = PropertiesHandler(wikidata, wikipedia, handler_config)
     relations = RelationsHandler(wikidata, wikipedia, handler_config)

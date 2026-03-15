@@ -134,12 +134,14 @@ class TraceContext:
         command: str,
         path: str,
         flags: list[str],
+        run_id: str | None = None,
     ) -> None:
         self._trace_id = trace_id
         self._request_id = request_id
         self._command = command
         self._path = path
         self._flags = flags
+        self._run_id = run_id
         self._start = time.perf_counter()
         self._phases: list[TracePhase] = []
         self._cache_hits = 0
@@ -190,6 +192,7 @@ class TraceCollector:
         path: str,
         flags: list[str],
         request_id: str | None = None,
+        run_id: str | None = None,
     ) -> TraceContext:
         """Start a new trace. Returns TraceContext for phase measurement."""
         trace_id = str(uuid.uuid4())
@@ -200,6 +203,7 @@ class TraceCollector:
             command=command,
             path=path,
             flags=flags,
+            run_id=run_id,
         )
 
     def finish_trace(self, ctx: TraceContext, exit_code: int) -> Trace:

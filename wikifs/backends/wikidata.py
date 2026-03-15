@@ -23,6 +23,7 @@ from wikifs.backends.wikidata_models import (
 )
 from wikifs.cache import Cache
 from wikifs.config import ApiConfig
+from wikifs.errors import ErrorCollector
 from wikifs.tracing import TraceContext
 
 
@@ -70,10 +71,38 @@ def _property_labels_cache_key(prop_ids: str, lang: str) -> str:
     return f"wikidata:property_labels:{prop_ids}:{lang}"
 
 
+def _record_api_error(
+    error_collector: ErrorCollector | None,
+    ctx: TraceContext | None,
+    category: str,
+    severity: str,
+    message: str,
+    details: dict[str, Any],
+) -> None:
+    """Record error if collector and ctx available."""
+    if error_collector is None:
+        return
+    trace_id = ctx._trace_id if ctx else None
+    run_id = ctx._run_id if ctx else None
+    command = ctx._command if ctx else None
+    path = ctx._path if ctx else None
+    error_collector.record(
+        category=category,
+        severity=severity,
+        message=message,
+        details=details,
+        trace_id=trace_id,
+        run_id=run_id,
+        command=command,
+        path=path,
+    )
+
+
 def _http_get(
     url: str,
     config: ApiConfig,
     ctx: TraceContext | None = None,
+    error_collector: ErrorCollector | None = None,
 ) -> bytes:
     """Perform HTTP GET with retry logic for 429 and 5xx."""
     headers = {"User-Agent": config.user_agent}
@@ -84,6 +113,14 @@ def _http_get(
         try:
             resp = requests.get(url, headers=headers, timeout=timeout)
         except requests.Timeout as e:
+            _record_api_error(
+                error_collector,
+                ctx,
+                "timeout",
+                "error",
+                f"Request timeout: {url}",
+                {"url": url, "error": str(e)},
+            )
             raise WikidataTimeoutError(f"Request timeout: {url}") from e
 
         if resp.status_code == 429:
@@ -95,20 +132,52 @@ def _http_get(
             if attempt < 3:
                 time.sleep(wait_sec)
                 continue
+            _record_api_error(
+                error_collector,
+                ctx,
+                "api",
+                "error",
+                f"Rate limit exceeded after 3 retries: {url}",
+                {"url": url, "status_code": 429},
+            )
             raise WikidataRateLimitError(
                 f"Rate limit exceeded after 3 retries: {url}"
             ) from None
 
         if resp.status_code == 404:
+            _record_api_error(
+                error_collector,
+                ctx,
+                "api",
+                "warning",
+                f"Not found: {url}",
+                {"url": url, "status_code": 404},
+            )
             raise WikidataError("Not found") from None
 
         if 500 <= resp.status_code < 600:
             if attempt == 0:
                 time.sleep(1)
                 continue
+            _record_api_error(
+                error_collector,
+                ctx,
+                "api",
+                "critical",
+                f"Server error {resp.status_code}: {url}",
+                {"url": url, "status_code": resp.status_code},
+            )
             raise WikidataError(f"Server error {resp.status_code}: {url}") from None
 
         if resp.status_code != 200:
+            _record_api_error(
+                error_collector,
+                ctx,
+                "api",
+                "error",
+                f"HTTP {resp.status_code}: {url}",
+                {"url": url, "status_code": resp.status_code},
+            )
             raise WikidataError(f"HTTP {resp.status_code}: {url}") from None
 
         data: bytes = resp.content
@@ -125,13 +194,14 @@ def _fetch_or_cache(
     url: str,
     config: ApiConfig,
     ctx: TraceContext | None,
+    error_collector: ErrorCollector | None = None,
 ) -> bytes | None:
     """Fetch from cache or API. Returns None on 404."""
     cached = cache.get(key, ctx)
     if cached is not None:
         return cached
     try:
-        data = _http_get(url, config, ctx)
+        data = _http_get(url, config, ctx, error_collector)
         cache.set(key, data)
         return data
     except WikidataError as e:
@@ -296,9 +366,15 @@ def _resolve_entity_from_search(
 class WikidataClient:
     """Wikidata API client with caching and trace integration."""
 
-    def __init__(self, config: ApiConfig, cache: Cache) -> None:
+    def __init__(
+        self,
+        config: ApiConfig,
+        cache: Cache,
+        error_collector: ErrorCollector | None = None,
+    ) -> None:
         self._config = config
         self._cache = cache
+        self._error_collector = error_collector
         self._base = config.wikidata_base_url.rstrip("/")
 
     def resolve_entity(
@@ -342,7 +418,7 @@ class WikidataClient:
 
         cm = ctx.phase("resolve_entity") if ctx else nullcontext()
         with cm:
-            data_bytes = _http_get(url, self._config, ctx)
+            data_bytes = _http_get(url, self._config, ctx, self._error_collector)
 
         data = json.loads(data_bytes)
         search_results = data.get("search", [])
@@ -442,7 +518,7 @@ class WikidataClient:
 
         url = f"{self._base}/wiki/Special:EntityData/{entity_id}.json"
         data = _fetch_or_cache(
-            self._cache, key, url, self._config, ctx
+            self._cache, key, url, self._config, ctx, self._error_collector
         )
         if data is None:
             return None
@@ -540,7 +616,7 @@ class WikidataClient:
             f"&languages={lang}"
             f"&format=json"
         )
-        data_bytes = _http_get(url, self._config, ctx)
+        data_bytes = _http_get(url, self._config, ctx, self._error_collector)
         data = json.loads(data_bytes)
         entities = data.get("entities", {})
         result: dict[str, str] = {}
@@ -580,7 +656,7 @@ class WikidataClient:
             f"&limit={limit}"
         )
         data_bytes = _fetch_or_cache(
-            self._cache, key, url, self._config, ctx
+            self._cache, key, url, self._config, ctx, self._error_collector
         )
         if data_bytes is None:
             return []
@@ -617,7 +693,7 @@ class WikidataClient:
             f"?query={quote(query)}"
             f"&format=json"
         )
-        data_bytes = _http_get(url, self._config, ctx)
+        data_bytes = _http_get(url, self._config, ctx, self._error_collector)
         data = json.loads(data_bytes)
         results = data.get("results", {}).get("bindings", [])
         # Normalize: extract values from bindings
