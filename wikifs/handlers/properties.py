@@ -14,6 +14,13 @@ if TYPE_CHECKING:
     from wikifs.tracing import TraceContext
 
 
+# Common property aliases (English) for demo/CLI compatibility across languages
+PROPERTY_ALIASES: dict[str, str] = {
+    "population": "P1082",
+    "country": "P17",
+}
+
+
 def _prop_label_to_filename(label: str, property_id: str, seen: set[str]) -> str:
     """Convert property label to filename. Handles duplicates with {label}_{property_id}.txt."""
     base = label.replace(" ", "_").lower()
@@ -147,10 +154,17 @@ class PropertiesHandler:
         prop_ids = list({c.property_id for c in entity.claims})
         labels = self._wikidata.get_property_labels(prop_ids, lang=lang, ctx=ctx)
         prop_name_base = prop_name.replace(".txt", "").lower()
+        # Resolve alias (e.g. "population" -> P1082) for cross-language CLI usage
+        resolved_pid = PROPERTY_ALIASES.get(prop_name_base)
         for c in entity.claims:
             label = labels.get(c.property_id, c.property_id)
             fname_base = label.replace(" ", "_").lower()
-            if fname_base == prop_name_base or f"{fname_base}_{c.property_id}" == prop_name_base:
+            pid_match = resolved_pid and c.property_id.upper() == resolved_pid.upper()
+            if (
+                fname_base == prop_name_base
+                or f"{fname_base}_{c.property_id}" == prop_name_base
+                or pid_match
+            ):
                 qual_str = ", ".join(c.qualifiers.values()) if c.qualifiers else ""
                 content = c.value
                 if qual_str:
