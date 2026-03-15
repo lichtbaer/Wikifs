@@ -328,6 +328,40 @@ class TraceStore:
             )
             conn.commit()
 
+    def get_by_trace_id(self, trace_id: str) -> Trace | None:
+        """Fetch a single trace by trace_id. Returns None if not found."""
+        with sqlite3.connect(self._path) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                """
+                SELECT trace_id, request_id, timestamp, command, path, flags, phases,
+                       total_duration_ms, cache_hits, cache_misses, api_calls,
+                       response_bytes, exit_code
+                FROM traces
+                WHERE trace_id = ?
+                """,
+                (trace_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        phases_data = json.loads(row["phases"])
+        phases = [_dict_to_phase(d) for d in phases_data]
+        return Trace(
+            trace_id=row["trace_id"],
+            request_id=row["request_id"],
+            timestamp=row["timestamp"],
+            command=row["command"],
+            path=row["path"],
+            flags=json.loads(row["flags"]),
+            phases=phases,
+            total_duration_ms=row["total_duration_ms"],
+            cache_hits=row["cache_hits"],
+            cache_misses=row["cache_misses"],
+            api_calls=row["api_calls"],
+            response_bytes=row["response_bytes"],
+            exit_code=row["exit_code"],
+        )
+
     def query(
         self,
         min_duration_ms: float | None = None,

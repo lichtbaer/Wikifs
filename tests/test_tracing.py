@@ -137,6 +137,35 @@ def test_trace_store_save_and_query() -> None:
         assert "Frankfurt" in result_path[0].path
 
 
+def test_trace_store_get_by_trace_id() -> None:
+    """TraceStore.get_by_trace_id fetches single trace by id."""
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = Path(tmp) / "traces.db"
+        store = TraceStore(str(db_path))
+        trace = Trace(
+            trace_id="tid-unique",
+            request_id="req-1",
+            timestamp="2025-01-01T12:00:00Z",
+            command="cat",
+            path="/wiki/entities/Frankfurt/article.md",
+            flags=[],
+            phases=[TracePhase("fetch", 10.0, "ok")],
+            total_duration_ms=50.0,
+            cache_hits=0,
+            cache_misses=1,
+            api_calls=1,
+            response_bytes=1024,
+            exit_code=0,
+        )
+        store.save(trace)
+        found = store.get_by_trace_id("tid-unique")
+        assert found is not None
+        assert found.trace_id == "tid-unique"
+        assert found.command == "cat"
+        assert len(found.phases) == 1
+        assert store.get_by_trace_id("nonexistent") is None
+
+
 def test_trace_store_stats() -> None:
     """TraceStore.stats returns correct aggregates."""
     with tempfile.TemporaryDirectory() as tmp:

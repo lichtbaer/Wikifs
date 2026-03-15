@@ -246,5 +246,19 @@ def cache_clear() -> None:
     click.echo(f"Cleared {deleted} cache entry(ies).")
 
 
+@main.command()
+@click.option(
+    "--port",
+    type=int,
+    default=8000,
+    help="Port to bind the HTTP server",
+)
+def serve(port: int) -> None:
+    """Start the FastAPI HTTP server."""
+    import uvicorn
+
+    uvicorn.run("server:app", host="0.0.0.0", port=port, reload=False)
+
+
 if __name__ == "__main__":
     main()
