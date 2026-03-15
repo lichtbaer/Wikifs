@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from wikifs import __version__, create_interpreter_with_components
+from wikifs.agent_models import AgentRequest
 from wikifs.tracing import TraceStats
 
 app = FastAPI(title="WikiFS HTTP API", version=__version__)
@@ -139,3 +140,30 @@ def cache_clear() -> dict[str, int]:
     ctx = _get_ctx()
     deleted = ctx.cache.clear()
     return {"deleted": deleted}
+
+
+@app.post("/agent")
+def agent(req: AgentRequest) -> dict[str, Any]:
+    """Run the WikiFS AI agent on a natural language query.
+
+    Request: {"query": "string", "model": "openai:gpt-4o" (optional)}
+    Response: {
+        "answer": "string",
+        "commands_executed": [{"command": "ls", "path": "...", "timing_ms": 142}, ...],
+        "total_commands": 5,
+        "total_duration_ms": 1200
+    }
+    """
+    from wikifs.agent import run_agent
+
+    try:
+        result = run_agent(
+            query=req.query,
+            model=req.model,
+        )
+    except ValueError as e:
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+    return result.model_dump()

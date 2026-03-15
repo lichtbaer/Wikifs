@@ -57,6 +57,10 @@ def load_config(config_path: str | Path | None = None) -> dict[str, Any]:
             "default_limit": 100,
             "max_limit": 500,
         },
+        "agent": {
+            "default_model": "openai:gpt-4o",
+            "max_tool_calls": 20,
+        },
     }
 
     if config_path is None:
