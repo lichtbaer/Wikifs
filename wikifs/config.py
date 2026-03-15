@@ -3,8 +3,30 @@
 from __future__ import annotations
 
 import tomllib
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+
+@dataclass
+class ApiConfig:
+    """API configuration for Wikidata and Wikipedia clients."""
+
+    wikidata_base_url: str
+    wikipedia_base_url: str
+    request_timeout_seconds: int
+    user_agent: str
+
+    @classmethod
+    def from_dict(cls, config: dict[str, Any]) -> ApiConfig:
+        """Create ApiConfig from loaded config dict."""
+        api = config.get("api", {})
+        return cls(
+            wikidata_base_url=str(api.get("wikidata_base_url", "https://www.wikidata.org")),
+            wikipedia_base_url=str(api.get("wikipedia_base_url", "https://{lang}.wikipedia.org")),
+            request_timeout_seconds=int(api.get("request_timeout_seconds", 10)),
+            user_agent=str(api.get("user_agent", "WikiFS/0.1 (https://github.com/Lichtbaer/wikifs)")),
+        )
 
 
 def load_config(config_path: str | Path | None = None) -> dict[str, Any]:
