@@ -1,3 +1,65 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-slate-950 text-slate-100;
+    font-family: 'Fira Code', 'Cascadia Code', 'JetBrains Mono', 'Menlo', 'Monaco', 'Courier New', monospace;
+  }
+
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    @apply bg-slate-900;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-slate-600 rounded;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-slate-500;
+  }
+}
+
+@layer components {
+  .terminal-glow:focus {
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.4), 0 0 12px rgba(59, 130, 246, 0.15);
+  }
+
+  .prose-terminal {
+    @apply text-slate-200;
+  }
+  .prose-terminal h1,
+  .prose-terminal h2,
+  .prose-terminal h3,
+  .prose-terminal h4 {
+    @apply text-slate-100 font-semibold;
+  }
+  .prose-terminal p {
+    @apply text-slate-300 leading-relaxed;
+  }
+  .prose-terminal a {
+    @apply text-blue-400 hover:text-blue-300 underline;
+  }
+  .prose-terminal code {
+    @apply text-green-400 bg-slate-800 px-1 py-0.5 rounded text-sm;
+  }
+  .prose-terminal pre {
+    @apply bg-slate-800 border border-slate-700 rounded p-3;
+  }
+  .prose-terminal blockquote {
+    @apply border-l-2 border-blue-500 pl-3 text-slate-400 italic;
+  }
+  .prose-terminal ul,
+  .prose-terminal ol {
+    @apply text-slate-300;
+  }
+  .prose-terminal strong {
+    @apply text-slate-100 font-semibold;
+  }
+  .prose-terminal hr {
+    @apply border-slate-700;
+  }
+}

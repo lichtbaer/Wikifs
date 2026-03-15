@@ -53,50 +53,91 @@ function App() {
   }, [showStats, loadStats]);
 
   return (
-    <div className="flex min-h-screen flex-col bg-gray-100">
-      <header className="flex items-center justify-between border-b border-gray-200 bg-white px-4 py-3">
-        <h1 className="text-lg font-semibold">WikiFS Explorer</h1>
-        <button
-          type="button"
-          onClick={() => setShowStats(true)}
-          className="rounded border border-gray-300 bg-white px-3 py-1 text-sm hover:bg-gray-50"
-        >
-          Stats
-        </button>
+    <div className="flex min-h-screen flex-col bg-slate-950">
+      {/* Header */}
+      <header className="flex items-center justify-between border-b border-slate-700/60 bg-slate-900/90 px-5 py-3 backdrop-blur-sm">
+        <div className="flex items-center gap-3">
+          <span className="flex items-center justify-center w-8 h-8 rounded bg-blue-600/20 border border-blue-500/30 text-blue-400 font-mono text-sm font-bold select-none">
+            &gt;_
+          </span>
+          <div>
+            <h1 className="text-sm font-semibold text-slate-100 leading-none">WikiFS Explorer</h1>
+            <p className="text-xs text-slate-500 mt-0.5">Wikipedia als virtuelles Dateisystem</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-3">
+          {/* Server Status */}
+          <div className="flex items-center gap-1.5">
+            <span
+              className={`w-2 h-2 rounded-full ${
+                serverOnline === null
+                  ? "bg-slate-500"
+                  : serverOnline
+                  ? "bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.6)]"
+                  : "bg-red-500 shadow-[0_0_6px_rgba(239,68,68,0.6)]"
+              }`}
+            />
+            <span className="text-xs text-slate-500">
+              {serverOnline === null ? "Verbinden…" : serverOnline ? "Online" : "Offline"}
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowStats(true)}
+            className="rounded-full border border-slate-600 bg-slate-800 px-3 py-1 text-xs text-slate-300 hover:bg-slate-700 hover:text-slate-100 transition-colors"
+          >
+            ◎ Stats
+          </button>
+        </div>
       </header>
 
-      <main className="flex flex-1 flex-col gap-4 p-4">
+      <main className="flex flex-1 flex-col gap-3 p-4">
+        {/* Alerts */}
         {serverOnline === false && (
-          <div className="rounded border border-amber-500 bg-amber-50 px-4 py-2 text-sm text-amber-800">
-            WikiFS-Server nicht erreichbar. Starten mit: <code className="font-mono">wikifs serve</code>
+          <div className="flex items-center gap-2 rounded-lg border border-amber-500/40 bg-amber-950/40 px-4 py-2.5 text-sm text-amber-300">
+            <span className="text-amber-400">⚠</span>
+            <span>
+              WikiFS-Server nicht erreichbar — starten mit:{" "}
+              <code className="font-mono text-amber-200 bg-amber-900/50 px-1.5 py-0.5 rounded text-xs">
+                wikifs serve
+              </code>
+            </span>
           </div>
         )}
 
         {apiError && (
-          <div className="rounded border border-red-500 bg-red-50 px-4 py-2 text-sm text-red-800">
-            {apiError}
+          <div className="flex items-center justify-between gap-2 rounded-lg border border-red-500/40 bg-red-950/40 px-4 py-2.5 text-sm text-red-300">
+            <span className="flex items-center gap-2">
+              <span className="text-red-400">✗</span>
+              {apiError}
+            </span>
             <button
               type="button"
               onClick={clearApiError}
-              className="ml-2 text-red-600 hover:underline"
+              className="text-red-400 hover:text-red-200 transition-colors ml-2 text-xs"
             >
-              Schließen
+              Schließen ×
             </button>
           </div>
         )}
 
-        <section>
-          <label className="mb-2 block text-sm font-medium text-gray-700">
-            Command Input
-          </label>
+        {/* Command Area */}
+        <section className="rounded-lg border border-slate-700/60 bg-slate-900/60 p-3">
+          <div className="mb-2">
+            <Breadcrumb path={currentPath} onNavigate={navigateTo} />
+          </div>
           <CommandInput onRun={runCommand} loading={loading} history={history} />
+          <div className="mt-2">
+            <QuickActions onRun={runCommand} loading={loading} />
+          </div>
         </section>
 
-        <QuickActions onRun={runCommand} loading={loading} />
-
-        <div className="grid flex-1 gap-4 md:grid-cols-2">
+        {/* Output + Trace */}
+        <div className="grid flex-1 gap-3 md:grid-cols-2">
           <section className="flex flex-col">
-            <h2 className="mb-2 text-sm font-medium text-gray-700">Output</h2>
+            <h2 className="mb-1.5 text-xs font-medium text-slate-500 uppercase tracking-wider">
+              Output
+            </h2>
             <OutputPanel
               output={output}
               exitCode={exitCode}
@@ -107,15 +148,12 @@ function App() {
             />
           </section>
           <section className="flex flex-col">
-            <h2 className="mb-2 text-sm font-medium text-gray-700">Trace Timeline</h2>
+            <h2 className="mb-1.5 text-xs font-medium text-slate-500 uppercase tracking-wider">
+              Trace Timeline
+            </h2>
             <TraceTimeline trace={trace} />
           </section>
         </div>
-
-        <section className="rounded border border-gray-200 bg-white p-4">
-          <h2 className="mb-2 text-sm font-medium text-gray-700">Navigation Breadcrumb</h2>
-          <Breadcrumb path={currentPath} onNavigate={navigateTo} />
-        </section>
       </main>
 
       {showStats && (
