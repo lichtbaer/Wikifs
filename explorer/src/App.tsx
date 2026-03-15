@@ -7,9 +7,13 @@ import { OutputPanel } from "./components/OutputPanel";
 import { TraceTimeline } from "./components/TraceTimeline";
 import { Breadcrumb } from "./components/Breadcrumb";
 import { StatsView } from "./components/StatsView";
+import { AgentPanel } from "./components/AgentPanel";
 import type { Stats } from "./types";
 
+type TabMode = "manual" | "agent";
+
 function App() {
+  const [tabMode, setTabMode] = useState<TabMode>("manual");
   const {
     output,
     exitCode,
@@ -66,6 +70,31 @@ function App() {
           </div>
         </div>
         <div className="flex items-center gap-3">
+          {/* Tabs */}
+          <div className="flex rounded-lg border border-slate-700/60 bg-slate-800/60 p-0.5">
+            <button
+              type="button"
+              onClick={() => setTabMode("manual")}
+              className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
+                tabMode === "manual"
+                  ? "bg-slate-700 text-slate-100"
+                  : "text-slate-500 hover:text-slate-300"
+              }`}
+            >
+              Manual
+            </button>
+            <button
+              type="button"
+              onClick={() => setTabMode("agent")}
+              className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
+                tabMode === "agent"
+                  ? "bg-slate-700 text-slate-100"
+                  : "text-slate-500 hover:text-slate-300"
+              }`}
+            >
+              Agent
+            </button>
+          </div>
           {/* Server Status */}
           <div className="flex items-center gap-1.5">
             <span
@@ -121,39 +150,45 @@ function App() {
           </div>
         )}
 
-        {/* Command Area */}
-        <section className="rounded-lg border border-slate-700/60 bg-slate-900/60 p-3">
-          <div className="mb-2">
-            <Breadcrumb path={currentPath} onNavigate={navigateTo} />
-          </div>
-          <CommandInput onRun={runCommand} loading={loading} history={history} />
-          <div className="mt-2">
-            <QuickActions onRun={runCommand} loading={loading} />
-          </div>
-        </section>
+        {tabMode === "manual" ? (
+          <>
+            {/* Command Area */}
+            <section className="rounded-lg border border-slate-700/60 bg-slate-900/60 p-3">
+              <div className="mb-2">
+                <Breadcrumb path={currentPath} onNavigate={navigateTo} />
+              </div>
+              <CommandInput onRun={runCommand} loading={loading} history={history} />
+              <div className="mt-2">
+                <QuickActions onRun={runCommand} loading={loading} />
+              </div>
+            </section>
 
-        {/* Output + Trace */}
-        <div className="grid flex-1 gap-3 md:grid-cols-2">
-          <section className="flex flex-col">
-            <h2 className="mb-1.5 text-xs font-medium text-slate-500 uppercase tracking-wider">
-              Output
-            </h2>
-            <OutputPanel
-              output={output}
-              exitCode={exitCode}
-              errorType={errorType}
-              suggestions={suggestions}
-              currentPath={currentPath}
-              onNavigate={navigateTo}
-            />
-          </section>
-          <section className="flex flex-col">
-            <h2 className="mb-1.5 text-xs font-medium text-slate-500 uppercase tracking-wider">
-              Trace Timeline
-            </h2>
-            <TraceTimeline trace={trace} />
-          </section>
-        </div>
+            {/* Output + Trace */}
+            <div className="grid flex-1 gap-3 md:grid-cols-2">
+              <section className="flex flex-col">
+                <h2 className="mb-1.5 text-xs font-medium text-slate-500 uppercase tracking-wider">
+                  Output
+                </h2>
+                <OutputPanel
+                  output={output}
+                  exitCode={exitCode}
+                  errorType={errorType}
+                  suggestions={suggestions}
+                  currentPath={currentPath}
+                  onNavigate={navigateTo}
+                />
+              </section>
+              <section className="flex flex-col">
+                <h2 className="mb-1.5 text-xs font-medium text-slate-500 uppercase tracking-wider">
+                  Trace Timeline
+                </h2>
+                <TraceTimeline trace={trace} />
+              </section>
+            </div>
+          </>
+        ) : (
+          <AgentPanel />
+        )}
       </main>
 
       {showStats && (

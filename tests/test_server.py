@@ -223,6 +223,72 @@ def test_agent_invalid_request_returns_400() -> None:
     assert r.status_code in (400, 422)  # Validation error
 
 
+def test_agent_stream_returns_sse_events(monkeypatch: pytest.MonkeyPatch, temp_config: Path) -> None:
+    """POST /agent/stream returns Server-Sent Events stream."""
+    import server as server_module
+
+    server_module._server_ctx = None
+    from wikifs import create_interpreter_with_components
+
+    server_module._server_ctx = create_interpreter_with_components(str(temp_config))
+
+    events_received: list[tuple[str, dict]] = []
+
+    def mock_run_agent_streaming(
+        query: str,
+        callback: object,
+        config_path: str | None = None,
+        model: str | None = None,
+        trace_store: object = None,
+    ) -> object:
+        from wikifs.agent import AgentEvent
+
+        cb = callback
+        if callable(cb):
+            cb(AgentEvent("agent_start", {"run_id": "test-123", "query": query, "model": "openai:gpt-4o"}))
+            cb(AgentEvent("thinking", {"message": "Planning..."}))
+            cb(AgentEvent("tool_call", {"command": "search", "path": "/wiki/search", "pattern": "Berlin", "step": 1}))
+            cb(
+                AgentEvent(
+                    "tool_result",
+                    {"step": 1, "output": "Berlin Q64", "exit_code": 0, "timing_ms": 50, "trace": None},
+                )
+            )
+            cb(
+                AgentEvent(
+                    "answer",
+                    {"answer": "Berlin has 3.7M inhabitants.", "total_commands": 1, "total_duration_ms": 200},
+                )
+            )
+            cb(AgentEvent("done", {"run_id": "test-123", "success": True}))
+        from wikifs.agent_models import AgentResponse, CommandExecuted
+
+        return AgentResponse(
+            answer="Berlin has 3.7M inhabitants.",
+            commands_executed=[
+                CommandExecuted(command="search", path="/wiki/search", timing_ms=50.0),
+            ],
+            total_commands=1,
+            total_duration_ms=200.0,
+        )
+
+    monkeypatch.setattr("server.run_agent_streaming", mock_run_agent_streaming)
+
+    with TestClient(app) as c:
+        r = c.post("/agent/stream", json={"query": "Population of Berlin?"})
+    assert r.status_code == 200
+    assert "text/event-stream" in r.headers.get("content-type", "")
+    text = r.text
+    assert "event: agent_start" in text
+    assert "event: thinking" in text
+    assert "event: tool_call" in text
+    assert "event: tool_result" in text
+    assert "event: answer" in text
+    assert "event: done" in text
+    assert "run_id" in text
+    assert "Berlin" in text
+
+
 def test_errors_endpoint(temp_config: Path) -> None:
     """GET /errors returns error list (possibly empty)."""
     import server as server_module

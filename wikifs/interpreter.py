@@ -170,6 +170,11 @@ class Interpreter:
         self._error_collector = error_collector
         self._run_store = run_store
 
+    @property
+    def trace_store(self) -> TraceStore | None:
+        """Trace store for persistence and lookup."""
+        return self._trace_store
+
     def _persist_cli_run(
         self,
         run_id: str,

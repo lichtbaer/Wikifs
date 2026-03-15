@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
+import queue
 from typing import Any
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 
 from wikifs import __version__, create_interpreter_with_components
+from wikifs.agent import AgentEvent, run_agent_streaming
 from wikifs.agent_models import AgentRequest
 from wikifs.tracing import TraceStats
 
@@ -320,3 +325,65 @@ def agent(req: AgentRequest) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
     return result.model_dump()
+
+
+def _agent_stream_generator(
+    query: str,
+    model: str | None,
+    trace_store: Any,
+    event_queue: queue.Queue[AgentEvent | None],
+) -> Any:
+    """Run agent and put events into queue. None signals completion."""
+    try:
+        run_agent_streaming(
+            query=query,
+            callback=lambda e: event_queue.put(e),
+            model=model,
+            trace_store=trace_store,
+        )
+    except Exception:
+        pass
+    finally:
+        event_queue.put(None)
+
+
+async def _sse_event_generator(
+    query: str,
+    model: str | None,
+    trace_store: Any,
+) -> Any:
+    """Async generator yielding SSE-formatted events."""
+    event_queue: queue.Queue[AgentEvent | None] = queue.Queue()
+    loop = asyncio.get_event_loop()
+    loop.run_in_executor(
+        None,
+        lambda: _agent_stream_generator(query, model, trace_store, event_queue),
+    )
+    while True:
+        event = await asyncio.get_event_loop().run_in_executor(
+            None,
+            lambda: event_queue.get(),
+        )
+        if event is None:
+            break
+        yield f"event: {event.type}\ndata: {json.dumps(event.data)}\n\n"
+
+
+@app.post("/agent/stream")
+async def agent_stream(req: AgentRequest) -> StreamingResponse:
+    """Stream agent steps as Server-Sent Events.
+
+    Request: {"query": "string", "model": "openai:gpt-4o" (optional)}
+    Response: text/event-stream with events: agent_start, thinking, tool_call,
+    tool_result, answer, done (or error, done).
+    """
+    ctx = _get_ctx()
+    return StreamingResponse(
+        _sse_event_generator(req.query, req.model, ctx.trace_store),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
