@@ -1,27 +1,102 @@
 # WikiFS
 
-Virtual Filesystem over Wikipedia & Wikidata for AI Agents.
+Virtual filesystem over Wikipedia and Wikidata for AI agents. Exposes Wikipedia articles and the Wikidata knowledge graph via familiar shell commands (`ls`, `cat`, `grep`, `search`). Under the hood: structured API calls and SPARQL queries. Proof of concept for the pattern "Filesystem as Integration Layer".
 
-## Setup
+## Quick Start
 
 ```bash
 python -m venv .venv
-source .venv/bin/activate  # Linux/macOS
-# oder: .venv\Scripts\activate  # Windows
+source .venv/bin/activate   # Linux/macOS
+# .venv\Scripts\activate    # Windows
 
 pip install -e .
+wikifs ls /wiki/entities/Frankfurt_am_Main/
 ```
 
-## Usage
+First command in under 5 minutes.
+
+## Commands
+
+| Command | Example |
+|---------|---------|
+| `ls` | `wikifs ls /wiki/entities/Frankfurt_am_Main/` |
+| `ls -l` | `wikifs ls -l /wiki/entities/Frankfurt_am_Main/` |
+| `cat` | `wikifs cat /wiki/entities/Frankfurt_am_Main/article.md` |
+| `cat` | `wikifs cat /wiki/entities/Frankfurt_am_Main/properties/population.txt` |
+| `grep` | `wikifs grep "Goethe" /wiki/entities/Frankfurt_am_Main/` |
+| `grep -i -c` | `wikifs grep -i -c "goethe" /wiki/entities/Frankfurt_am_Main/` |
+| `search` | `wikifs search "Goethe" --type entity --limit 5` |
+| `search --sparql` | `wikifs search --sparql "SELECT ?x WHERE { ?x wdt:P31 wd:Q515 } LIMIT 5"` |
+| `stats` | `wikifs stats` |
+| `traces` | `wikifs traces --slow 500` |
+| `traces` | `wikifs traces --path "/wiki/entities/*/article.md"` |
+| `traces` | `wikifs traces --command cat` |
+| `traces clear` | `wikifs traces clear --older-than 7` |
+| `cache stats` | `wikifs cache stats` |
+| `cache clear` | `wikifs cache clear` |
+
+## Architecture
+
+```
+Agent → JSON Command → Interpreter → Path Router → Backend Client → Response Formatter → Agent
+                              ↓
+                    Cache (L1 LRU + L2 SQLite)
+                              ↓
+                    Trace Store (SQLite)
+```
+
+See ADRs for design decisions.
+
+## Configuration
+
+`config.toml` (optional, in project root or `~/.wikifs/`):
+
+```toml
+[wikifs]
+default_language = "de"
+supported_languages = ["de", "en"]
+
+[cache]
+l1_max_size = 256
+l1_ttl_seconds = 3600
+l2_ttl_seconds = 86400
+l2_db_path = "~/.wikifs/cache.db"
+
+[tracing]
+enabled = true
+db_path = "~/.wikifs/traces.db"
+
+[api]
+wikidata_base_url = "https://www.wikidata.org"
+wikipedia_base_url = "https://{lang}.wikipedia.org"
+request_timeout_seconds = 10
+user_agent = "WikiFS/0.1 (https://github.com/Lichtbaer/wikifs)"
+
+[pagination]
+default_limit = 100
+max_limit = 500
+```
+
+## Observability
+
+- **`wikifs stats`** — Total commands, avg/P50/P95/max duration, cache hit rate, commands by type
+- **`wikifs traces --slow 500`** — Traces slower than 500 ms
+- **`wikifs traces --path "/wiki/entities/*/article.md"`** — Filter by path pattern
+- **`wikifs traces --command cat`** — Filter by command
+- **`wikifs traces clear --older-than 7`** — Delete traces older than 7 days
+- **`wikifs cache stats`** — L1/L2 hits, hit rate, sizes
+
+## The Pattern
+
+"Filesystem as Integration Layer" — arbitrary structured data sources exposed via a POSIX-like abstraction for AI agents. WikiFS demonstrates this with Wikipedia and Wikidata. See the concept paper for the full pattern.
+
+## Demo
 
 ```bash
-wikifs --help
-wikifs --version
-wikifs ls
-wikifs cat
-wikifs search
-# ... weitere Subcommands
+python scripts/demo.py
 ```
+
+Runs the reference flow (Frankfurt → Hessen → Deutschland), shows trace summary, and a second run to demonstrate cache effect.
 
 ## Development
 
@@ -30,3 +105,7 @@ ruff check .
 mypy --strict wikifs/
 pytest
 ```
+
+## License
+
+MIT
