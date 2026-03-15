@@ -1,6 +1,7 @@
 services:
   api:
     build: .
+    env_file: .env
     environment:
       WIKIFS_DATA_DIR: /data
     volumes:

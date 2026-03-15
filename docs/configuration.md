@@ -2,6 +2,15 @@
 
 WikiFS reads configuration from `config.toml`. The file is optional; defaults apply if missing.
 
+## Environment variables (API keys)
+
+For agent / natural language queries, the LLM provider needs an API key. Set it via environment variables (e.g. from a `.env` file):
+
+- **OpenAI** (`openai:gpt-4o` etc.): `OPENAI_API_KEY`
+- **Anthropic** (Claude): `ANTHROPIC_API_KEY`
+
+Copy `.env.example` to `.env`, then fill in the key that matches your `config.toml` → `[agent]` → `default_model`. Do not commit `.env` (it is in `.gitignore`).
+
 ## Location
 
 - Project root: `config.toml`

@@ -49,6 +49,8 @@ See ADRs for design decisions.
 
 ## Configuration
 
+**Environment variables (API keys):** For agent / natural language queries, set the LLM API key via environment variables. Copy `.env.example` to `.env` and fill in at least one key depending on `config.toml` → `[agent]` → `default_model` (e.g. `OPENAI_API_KEY` for `openai:gpt-4o`, `ANTHROPIC_API_KEY` for Anthropic models).
+
 `config.toml` (optional, in project root or `~/.wikifs/`):
 
 ```toml
@@ -106,7 +108,7 @@ Run API and Explorer in containers:
 docker compose up --build
 ```
 
-Then open [http://localhost:8080](http://localhost:8080). The Explorer UI is served by Nginx and proxies `/api` to the FastAPI backend. Cache and trace data are stored in a Docker volume (`wikifs_data`). To use a custom config, set `WIKIFS_DATA_DIR=/data` (default) and optionally mount `config.docker.toml` as the config file; the image uses `WIKIFS_DATA_DIR` to place SQLite DBs under `/data`.
+Then open [http://localhost:8080](http://localhost:8080). The Explorer UI is served by Nginx and proxies `/api` to the FastAPI backend. Cache and trace data are stored in a Docker volume (`wikifs_data`). For the agent to work, copy `.env.example` to `.env` and set e.g. `OPENAI_API_KEY`. To use a custom config, set `WIKIFS_DATA_DIR=/data` (default) and optionally mount `config.docker.toml` as the config file; the image uses `WIKIFS_DATA_DIR` to place SQLite DBs under `/data`.
 
 ## Development
 
