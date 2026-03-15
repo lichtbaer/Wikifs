@@ -31,8 +31,10 @@ def _entity_resolve(
 
 
 # Common relation aliases (English) for demo/CLI compatibility across languages
+# part_of = administrative hierarchy (Frankfurt→Hessen→Deutschland); P361 = component (motor→car)
 RELATION_ALIASES: dict[str, str] = {
-    "part_of": "P361",
+    "part_of": "P131",
+    "component_of": "P361",
     "country": "P17",
     "located_in": "P131",
 }

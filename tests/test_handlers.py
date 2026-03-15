@@ -87,6 +87,36 @@ def test_e2e_ls_relations() -> None:
         assert "Hessen" in resp.output or "Deutschland" in resp.output or "→" in resp.output
 
 
+def test_e2e_ls_relations_part_of() -> None:
+    """ls .../relations/part_of/ returns Hessen, Deutschland (P131, not P361)."""
+    with tempfile.TemporaryDirectory() as tmp:
+        interpreter = _create_interpreter(Path(tmp))
+        resp = interpreter.execute(
+            {
+                "command": "ls",
+                "path": "/wiki/entities/Frankfurt_am_Main/relations/part_of/",
+                "flags": [],
+            }
+        )
+        assert resp.exit_code == 0
+        assert "Hessen" in resp.output or "Deutschland" in resp.output or "→" in resp.output
+
+
+def test_e2e_ls_relations_located_in() -> None:
+    """ls .../relations/located_in/ works identically to part_of (both P131)."""
+    with tempfile.TemporaryDirectory() as tmp:
+        interpreter = _create_interpreter(Path(tmp))
+        resp = interpreter.execute(
+            {
+                "command": "ls",
+                "path": "/wiki/entities/Frankfurt_am_Main/relations/located_in/",
+                "flags": [],
+            }
+        )
+        assert resp.exit_code == 0
+        assert "Hessen" in resp.output or "Deutschland" in resp.output or "→" in resp.output
+
+
 def test_e2e_cat_summary() -> None:
     """cat .../summary.md returns summary."""
     with tempfile.TemporaryDirectory() as tmp:
