@@ -57,3 +57,35 @@ export interface ApiCommand {
   flags: string[];
   pattern?: string | null;
 }
+
+/** Agent stream event types */
+export type AgentEventType =
+  | "agent_start"
+  | "thinking"
+  | "tool_call"
+  | "tool_result"
+  | "answer"
+  | "error"
+  | "done";
+
+/** Single agent step (tool_call + tool_result) */
+export interface AgentStep {
+  step: number;
+  command: string;
+  path: string;
+  pattern?: string | null;
+  status: "pending" | "running" | "done" | "error";
+  output?: string | null;
+  exit_code?: number;
+  timing_ms?: number;
+  trace?: Trace | null;
+  error?: string | null;
+}
+
+/** Agent answer summary */
+export interface AgentAnswerSummary {
+  answer: string;
+  total_commands: number;
+  total_duration_ms: number;
+  cache_hits?: number;
+}
