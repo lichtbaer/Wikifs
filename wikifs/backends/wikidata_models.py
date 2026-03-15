@@ -23,6 +23,7 @@ class Claim:
     property_id: str  # "P1082"
     property_label: str  # "population"
     value: str  # "773.068"
+    value_type: str  # "quantity", "string", "wikibase-entityid", "time", "coordinate"
     qualifiers: dict[str, str]  # {"P585": "2023"} (point in time)
     rank: str  # "preferred", "normal", "deprecated"
 
