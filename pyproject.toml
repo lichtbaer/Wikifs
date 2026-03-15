@@ -25,6 +25,10 @@ dev = [
     "types-requests",
     "httpx",
 ]
+docs = [
+    "mkdocs",
+    "mkdocs-material",
+]
 
 [project.scripts]
 wikifs = "cli:main"
