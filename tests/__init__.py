@@ -1,0 +1,1 @@
+"""WikiFS test suite."""
