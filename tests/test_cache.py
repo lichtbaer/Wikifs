@@ -5,7 +5,7 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
-from wikifs.cache import Cache, CacheConfig, CacheStats
+from wikifs.cache import Cache, CacheConfig
 from wikifs.tracing import TraceCollector
 
 
