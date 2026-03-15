@@ -1,0 +1,35 @@
+site_name: WikiFS
+site_description: Virtual Filesystem over Wikipedia & Wikidata for AI Agents
+site_url: https://lichtbaer.github.io/wikifs/
+
+theme:
+  name: material
+  language: en
+
+nav:
+  - Home: index.md
+  - Getting Started: getting-started.md
+  - Commands:
+    - Overview: commands/index.md
+    - ls: commands/ls.md
+    - cat: commands/cat.md
+    - grep: commands/grep.md
+    - search: commands/search.md
+  - Architecture:
+    - Overview: architecture/overview.md
+    - The Pattern: architecture/the-pattern.md
+    - ADRs: architecture/adrs.md
+  - Configuration: configuration.md
+  - Explorer UI: explorer.md
+  - Observability: observability.md
+  - API Reference: api.md
+
+markdown_extensions:
+  - pymdownx.highlight
+  - pymdownx.superfences
+  - pymdownx.tabbed
+  - admonition
+  - tables
+
+plugins:
+  - search
