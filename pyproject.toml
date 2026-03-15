@@ -15,6 +15,7 @@ dependencies = [
     "click",
     "fastapi",
     "uvicorn[standard]",
+    "pydantic-ai>=1.0",
 ]
 
 [project.optional-dependencies]

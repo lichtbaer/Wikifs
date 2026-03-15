@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import tempfile
 from pathlib import Path
 
 import pytest
@@ -168,6 +167,57 @@ def test_cache_clear_returns_deleted_count(temp_config: Path) -> None:
     data = r.json()
     assert "deleted" in data
     assert isinstance(data["deleted"], int)
+
+
+def test_agent_returns_answer_and_commands_executed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """POST /agent returns answer, commands_executed, total_commands, total_duration_ms."""
+    from wikifs.agent_models import AgentResponse, CommandExecuted
+
+    mock_response = AgentResponse(
+        answer="Frankfurt has about 750,000 inhabitants.",
+        commands_executed=[
+            CommandExecuted(
+                command="search",
+                path="/wiki/search (query='Frankfurt')",
+                timing_ms=120.0,
+            ),
+            CommandExecuted(
+                command="cat",
+                path="/wiki/entities/Frankfurt_am_Main/properties/population.txt",
+                timing_ms=85.0,
+            ),
+        ],
+        total_commands=2,
+        total_duration_ms=1500.0,
+    )
+
+    def mock_run_agent(
+        query: str,
+        config_path: str | None = None,
+        model: str | None = None,
+    ) -> AgentResponse:
+        return mock_response
+
+    monkeypatch.setattr("wikifs.agent.run_agent", mock_run_agent)
+
+    with TestClient(app) as c:
+        r = c.post("/agent", json={"query": "What is the population of Frankfurt?"})
+    assert r.status_code == 200
+    data = r.json()
+    assert data["answer"] == "Frankfurt has about 750,000 inhabitants."
+    assert data["total_commands"] == 2
+    assert data["total_duration_ms"] == 1500.0
+    assert len(data["commands_executed"]) == 2
+    assert data["commands_executed"][0]["command"] == "search"
+    assert data["commands_executed"][0]["path"] == "/wiki/search (query='Frankfurt')"
+    assert data["commands_executed"][0]["timing_ms"] == 120.0
+
+
+def test_agent_invalid_request_returns_400() -> None:
+    """POST /agent with missing query returns 400 or 422."""
+    with TestClient(app) as c:
+        r = c.post("/agent", json={})
+    assert r.status_code in (400, 422)  # Validation error
 
 
 def test_cors_allows_localhost() -> None:

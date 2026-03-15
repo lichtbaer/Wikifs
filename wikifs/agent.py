@@ -1,0 +1,222 @@
+"""WikiFS Pydantic AI Agent — uses WikiFS as tools to answer natural language questions."""
+
+from __future__ import annotations
+
+import time
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
+
+from pydantic_ai import Agent
+from pydantic_ai.tools import RunContext
+from pydantic_ai.usage import UsageLimits
+
+from wikifs import create_interpreter
+from wikifs.agent_models import AgentResponse, CommandExecuted
+from wikifs.config import load_config
+
+if TYPE_CHECKING:
+    from wikifs.interpreter import Interpreter
+
+
+@dataclass
+class AgentDeps:
+    """Dependencies for WikiFS agent tools: interpreter and command tracking."""
+
+    interpreter: Interpreter
+    commands_executed: list[CommandExecuted] = field(default_factory=list)
+
+
+def _wikifs_ls(ctx: RunContext[AgentDeps], path: str, detailed: bool = False) -> str:
+    """List contents of a WikiFS directory.
+
+    Examples:
+    - ls /wiki/entities/Berlin/ → shows article.md, properties/, relations/, etc.
+    - ls /wiki/entities/Berlin/properties/ → shows available properties
+    - ls /wiki/entities/Berlin/relations/ → shows relation types
+    - ls /wiki/classes/city/ → shows cities
+    """
+    deps = ctx.deps
+    start = time.perf_counter()
+    flags = ["-l"] if detailed else []
+    result = deps.interpreter.execute({
+        "command": "ls",
+        "path": path,
+        "flags": flags,
+    })
+    timing_ms = (time.perf_counter() - start) * 1000
+    deps.commands_executed.append(
+        CommandExecuted(command="ls", path=path, timing_ms=timing_ms)
+    )
+    return result.output if result.exit_code == 0 else f"Error: {result.output}"
+
+
+def _wikifs_cat(ctx: RunContext[AgentDeps], path: str) -> str:
+    """Read contents of a WikiFS file.
+
+    Examples:
+    - cat /wiki/entities/Berlin/summary.md → short summary
+    - cat /wiki/entities/Berlin/article.md → full article
+    - cat /wiki/entities/Berlin/properties/population.txt → population value
+    - cat /wiki/entities/Berlin/meta.json → entity metadata
+    """
+    deps = ctx.deps
+    start = time.perf_counter()
+    result = deps.interpreter.execute({
+        "command": "cat",
+        "path": path,
+        "flags": [],
+    })
+    timing_ms = (time.perf_counter() - start) * 1000
+    deps.commands_executed.append(
+        CommandExecuted(command="cat", path=path, timing_ms=timing_ms)
+    )
+    return result.output if result.exit_code == 0 else f"Error: {result.output}"
+
+
+def _wikifs_grep(
+    ctx: RunContext[AgentDeps],
+    pattern: str,
+    path: str,
+    case_insensitive: bool = False,
+) -> str:
+    """Search for a pattern within a WikiFS entity.
+
+    Only works within a specific entity directory.
+    For cross-entity search, use wikifs_search instead.
+    """
+    deps = ctx.deps
+    start = time.perf_counter()
+    flags = ["-i"] if case_insensitive else []
+    result = deps.interpreter.execute({
+        "command": "grep",
+        "path": path,
+        "flags": flags,
+        "pattern": pattern,
+    })
+    timing_ms = (time.perf_counter() - start) * 1000
+    deps.commands_executed.append(
+        CommandExecuted(command="grep", path=path, timing_ms=timing_ms)
+    )
+    return result.output if result.exit_code == 0 else f"Error: {result.output}"
+
+
+def _wikifs_search(
+    ctx: RunContext[AgentDeps],
+    query: str,
+    entity_type: str = "entity",
+    limit: int = 5,
+) -> str:
+    """Search for entities across WikiFS.
+
+    Use this for discovering entities. For searching within
+    a specific entity, use wikifs_grep instead.
+    """
+    deps = ctx.deps
+    start = time.perf_counter()
+    result = deps.interpreter.execute({
+        "command": "search",
+        "path": "/wiki/search",
+        "flags": ["--type", entity_type, "--limit", str(limit)],
+        "pattern": query,
+    })
+    timing_ms = (time.perf_counter() - start) * 1000
+    deps.commands_executed.append(
+        CommandExecuted(
+            command="search",
+            path=f"/wiki/search (query={query!r})",
+            timing_ms=timing_ms,
+        )
+    )
+    return result.output if result.exit_code == 0 else f"Error: {result.output}"
+
+
+SYSTEM_PROMPT = """You are a research assistant with access to WikiFS —
+a virtual filesystem over Wikipedia and Wikidata. You can navigate
+entities, read articles, explore properties and relations, and search
+for information using filesystem-like commands.
+
+Available commands:
+- wikifs_ls(path): List directory contents (e.g. /wiki/entities/Berlin/)
+- wikifs_cat(path): Read file contents (e.g. article.md, properties/population.txt)
+- wikifs_grep(pattern, path): Search within a specific entity
+- wikifs_search(query): Search across entities to discover them
+
+Navigate the knowledge graph to find accurate answers. Use properties
+for structured facts, relations to explore connections, and articles
+for detailed context. Always verify facts by checking multiple sources
+within WikiFS. Include WikiFS paths as sources in your answer."""
+
+
+def _get_agent_config() -> tuple[str, int]:
+    """Load agent config from TOML."""
+    config = load_config()
+    agent_cfg = config.get("agent", {})
+    model = str(agent_cfg.get("default_model", "openai:gpt-4o"))
+    max_tool_calls = int(agent_cfg.get("max_tool_calls", 20))
+    return model, max_tool_calls
+
+
+WIKIFS_TOOLS = [_wikifs_ls, _wikifs_cat, _wikifs_grep, _wikifs_search]
+
+
+def create_wikifs_agent(
+    config_path: str | None = None,
+    model: str | None = None,
+) -> tuple[Agent[AgentDeps, str], AgentDeps]:
+    """Create WikiFS agent with tools. Returns (agent, deps) for run_sync(deps=...)."""
+    interpreter = create_interpreter(config_path)
+    deps = AgentDeps(interpreter=interpreter)
+
+    default_model, _ = _get_agent_config()
+    model = model or default_model
+
+    agent = Agent(
+        model=model,
+        deps_type=AgentDeps,
+        system_prompt=SYSTEM_PROMPT,
+        tools=WIKIFS_TOOLS,  # type: ignore[arg-type]
+        defer_model_check=True,
+    )
+    return agent, deps
+
+
+def run_agent(
+    query: str,
+    config_path: str | None = None,
+    model: str | None = None,
+) -> AgentResponse:
+    """Run the WikiFS agent on a query. Returns AgentResponse with answer and commands_executed."""
+    agent, deps = create_wikifs_agent(config_path=config_path, model=model)
+    config = load_config(config_path)
+    max_tool_calls = int(config.get("agent", {}).get("max_tool_calls", 20))
+    usage_limits = UsageLimits(tool_calls_limit=max_tool_calls)
+
+    start = time.perf_counter()
+    try:
+        result = agent.run_sync(query, deps=deps, usage_limits=usage_limits)
+    except Exception as e:
+        _check_api_key_error(e)
+        raise
+    total_duration_ms = (time.perf_counter() - start) * 1000
+
+    answer = str(result.output) if result.output is not None else ""
+    return AgentResponse(
+        answer=answer,
+        commands_executed=deps.commands_executed,
+        total_commands=len(deps.commands_executed),
+        total_duration_ms=total_duration_ms,
+    )
+
+
+def _check_api_key_error(exc: BaseException) -> None:
+    """Raise helpful error for missing API keys."""
+    msg = str(exc).lower()
+    if "api_key" in msg or "api key" in msg:
+        if "openai" in msg:
+            raise ValueError(
+                "OpenAI API key not set. Set OPENAI_API_KEY environment variable."
+            ) from exc
+        if "anthropic" in msg:
+            raise ValueError(
+                "Anthropic API key not set. Set ANTHROPIC_API_KEY environment variable."
+            ) from exc

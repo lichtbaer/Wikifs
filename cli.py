@@ -247,6 +247,37 @@ def cache_clear() -> None:
 
 
 @main.command()
+@click.argument("query", type=str, required=True)
+@click.option(
+    "--model",
+    type=str,
+    default=None,
+    help="Model override (e.g. openai:gpt-4o, anthropic:claude-sonnet)",
+)
+@click.option(
+    "--config",
+    "config_path",
+    type=click.Path(exists=True, path_type=str),
+    default=None,
+    help="Path to config.toml",
+)
+def agent(query: str, model: str | None, config_path: str | None) -> None:
+    """Run the WikiFS AI agent on a natural language query."""
+    try:
+        from wikifs.agent import run_agent
+
+        result = run_agent(query=query, config_path=config_path, model=model)
+        click.echo(result.answer)
+        if result.commands_executed:
+            click.echo("\n--- Commands executed ---", err=True)
+            for cmd in result.commands_executed:
+                click.echo(f"  {cmd.command} {cmd.path} ({cmd.timing_ms:.0f}ms)", err=True)
+    except ValueError as e:
+        click.echo(str(e), err=True)
+        sys.exit(1)
+
+
+@main.command()
 @click.option(
     "--port",
     type=int,
