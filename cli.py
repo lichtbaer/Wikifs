@@ -5,6 +5,7 @@ from __future__ import annotations
 import click
 
 from wikifs import __version__
+from wikifs.cache import Cache, CacheConfig, CacheStats
 from wikifs.config import load_config
 from wikifs.tracing import TraceStore
 
@@ -127,10 +128,59 @@ def traces_clear(older_than: int | None) -> None:
     click.echo(f"Deleted {deleted} trace(s).")
 
 
-@main.command()
-def cache() -> None:
-    """Manage cache."""
-    click.echo("Not implemented yet")
+def _get_cache() -> Cache:
+    """Get Cache instance from config."""
+    config = load_config()
+    cache_cfg = config.get("cache", {})
+    cfg = CacheConfig(
+        l1_max_size=int(cache_cfg.get("l1_max_size", 256)),
+        l1_ttl_seconds=int(cache_cfg.get("l1_ttl_seconds", 3600)),
+        l2_ttl_seconds=int(cache_cfg.get("l2_ttl_seconds", 86400)),
+        l2_db_path=str(cache_cfg.get("l2_db_path", "~/.wikifs/cache.db")),
+    )
+    return Cache(cfg)
+
+
+@main.group(invoke_without_command=True)
+@click.pass_context
+def cache(ctx: click.Context) -> None:
+    """Manage cache (L1 + L2)."""
+    if ctx.invoked_subcommand is not None:
+        return
+    # Default: show stats
+    cache_obj = _get_cache()
+    s = cache_obj.stats()
+    _print_cache_stats(s)
+
+
+def _print_cache_stats(s: CacheStats) -> None:
+    """Print cache statistics."""
+    total = s.l1_hits + s.l1_misses + s.l2_hits + s.l2_misses
+    click.echo(f"L1 Hits:     {s.l1_hits}")
+    click.echo(f"L1 Misses:   {s.l1_misses}")
+    click.echo(f"L2 Hits:     {s.l2_hits}")
+    click.echo(f"L2 Misses:   {s.l2_misses}")
+    click.echo(f"Hit Rate:    {s.hit_rate * 100:.1f}%")
+    click.echo(f"L1 Size:     {s.l1_size}")
+    click.echo(f"L2 Size:     {s.l2_size}")
+    if total > 0:
+        click.echo(f"Total Reqs:  {total}")
+
+
+@cache.command("stats")
+def cache_stats() -> None:
+    """Show cache statistics: Hit Rate, L1/L2 Size, Entry Count."""
+    cache_obj = _get_cache()
+    s = cache_obj.stats()
+    _print_cache_stats(s)
+
+
+@cache.command("clear")
+def cache_clear() -> None:
+    """Clear both cache levels (L1 + L2)."""
+    cache_obj = _get_cache()
+    deleted = cache_obj.clear()
+    click.echo(f"Cleared {deleted} cache entry(ies).")
 
 
 if __name__ == "__main__":
