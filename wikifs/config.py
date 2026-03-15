@@ -47,6 +47,9 @@ def load_config(config_path: str | Path | None = None) -> dict[str, Any]:
             "enabled": True,
             "db_path": "~/.wikifs/traces.db",
         },
+        "errors": {
+            "db_path": "~/.wikifs/errors.db",
+        },
         "api": {
             "wikidata_base_url": "https://www.wikidata.org",
             "wikipedia_base_url": "https://{lang}.wikipedia.org",
@@ -89,5 +92,6 @@ def load_config(config_path: str | Path | None = None) -> dict[str, Any]:
     if data_dir:
         result.setdefault("cache", {})["l2_db_path"] = str(Path(data_dir) / "cache.db")
         result.setdefault("tracing", {})["db_path"] = str(Path(data_dir) / "traces.db")
+        result.setdefault("errors", {})["db_path"] = str(Path(data_dir) / "errors.db")
 
     return result

@@ -18,6 +18,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import cast
 
+from wikifs.errors import ErrorCollector
 from wikifs.tracing import TraceContext
 
 
@@ -104,9 +105,15 @@ class _L1Cache:
 class _L2Cache:
     """SQLite-backed cache with lazy expiration cleanup."""
 
-    def __init__(self, db_path: str, ttl_seconds: int) -> None:
+    def __init__(
+        self,
+        db_path: str,
+        ttl_seconds: int,
+        error_collector: ErrorCollector | None = None,
+    ) -> None:
         self._path = _expand_path(db_path)
         self._ttl_seconds = ttl_seconds
+        self._error_collector = error_collector
         self._path.parent.mkdir(parents=True, exist_ok=True)
         self._init_schema()
 
@@ -131,18 +138,28 @@ class _L2Cache:
     def get(self, key: str) -> bytes | None:
         """Get value if present and not expired. Lazy-deletes expired on read."""
         now_iso = datetime.now(UTC).isoformat()
-        with sqlite3.connect(self._path) as conn:
-            row = conn.execute(
-                "SELECT value, expires_at FROM cache_entries WHERE key = ?", (key,)
-            ).fetchone()
-            if row is None:
-                return None
-            value, expires_at = row[0], row[1]
-            if now_iso >= expires_at:
-                conn.execute("DELETE FROM cache_entries WHERE key = ?", (key,))
-                conn.commit()
-                return None
-            return cast(bytes, value)
+        try:
+            with sqlite3.connect(self._path) as conn:
+                row = conn.execute(
+                    "SELECT value, expires_at FROM cache_entries WHERE key = ?", (key,)
+                ).fetchone()
+                if row is None:
+                    return None
+                value, expires_at = row[0], row[1]
+                if now_iso >= expires_at:
+                    conn.execute("DELETE FROM cache_entries WHERE key = ?", (key,))
+                    conn.commit()
+                    return None
+                return cast(bytes, value)
+        except sqlite3.Error as e:
+            if self._error_collector:
+                self._error_collector.record(
+                    category="cache",
+                    severity="error",
+                    message=f"SQLite error on cache get: {e}",
+                    details={"key": key, "error": str(e)},
+                )
+            raise
 
     def set(self, key: str, value: bytes, ttl_seconds: int | None = None) -> None:
         """Set value with TTL."""
@@ -153,16 +170,26 @@ class _L2Cache:
         expires_at_iso = expires_at.isoformat()
         size_bytes = len(value)
 
-        with sqlite3.connect(self._path) as conn:
-            conn.execute(
-                """
-                INSERT OR REPLACE INTO cache_entries
-                (key, value, created_at, expires_at, size_bytes)
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                (key, value, now_iso, expires_at_iso, size_bytes),
-            )
-            conn.commit()
+        try:
+            with sqlite3.connect(self._path) as conn:
+                conn.execute(
+                    """
+                    INSERT OR REPLACE INTO cache_entries
+                    (key, value, created_at, expires_at, size_bytes)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (key, value, now_iso, expires_at_iso, size_bytes),
+                )
+                conn.commit()
+        except sqlite3.Error as e:
+            if self._error_collector:
+                self._error_collector.record(
+                    category="cache",
+                    severity="error",
+                    message=f"SQLite error on cache set: {e}",
+                    details={"key": key, "error": str(e)},
+                )
+            raise
 
     def delete(self, key: str) -> bool:
         """Delete key. Returns True if key was present."""
@@ -192,10 +219,16 @@ class _L2Cache:
 class Cache:
     """Two-level cache: L1 (In-Memory LRU) → L2 (SQLite)."""
 
-    def __init__(self, config: CacheConfig) -> None:
+    def __init__(
+        self,
+        config: CacheConfig,
+        error_collector: ErrorCollector | None = None,
+    ) -> None:
         self._config = config
         self._l1 = _L1Cache(config.l1_max_size, config.l1_ttl_seconds)
-        self._l2 = _L2Cache(config.l2_db_path, config.l2_ttl_seconds)
+        self._l2 = _L2Cache(
+            config.l2_db_path, config.l2_ttl_seconds, error_collector
+        )
         self._l1_hits = 0
         self._l1_misses = 0
         self._l2_hits = 0

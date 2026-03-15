@@ -21,6 +21,14 @@ class CommandExecuted(BaseModel):
     command: str = Field(..., description="Command name (ls, cat, grep, search)")
     path: str = Field(..., description="Path or context used")
     timing_ms: float = Field(..., description="Execution time in milliseconds")
+    trace_id: str | None = Field(
+        default=None,
+        description="Trace ID from interpreter execution",
+    )
+    exit_code: int = Field(
+        default=0,
+        description="Exit code from command execution",
+    )
 
 
 class AgentResponse(BaseModel):

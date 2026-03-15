@@ -142,6 +142,159 @@ def cache_clear() -> dict[str, int]:
     return {"deleted": deleted}
 
 
+@app.get("/errors")
+def errors(
+    since: str | None = None,
+    category: str | None = None,
+    severity: str | None = None,
+    run_id: str | None = None,
+    unresolved: bool = False,
+    limit: int = 100,
+) -> list[dict[str, Any]]:
+    """Query errors. Params: since, category, severity, run_id, unresolved, limit."""
+    ctx = _get_ctx()
+    entries = ctx.error_store.query(
+        since=since,
+        category=category,
+        severity=severity,
+        run_id=run_id,
+        unresolved_only=unresolved,
+        limit=limit,
+    )
+    return [
+        {
+            "error_id": e.error_id,
+            "timestamp": e.timestamp,
+            "trace_id": e.trace_id,
+            "run_id": e.run_id,
+            "category": e.category,
+            "severity": e.severity,
+            "command": e.command,
+            "path": e.path,
+            "message": e.message,
+            "details": e.details,
+            "resolved": e.resolved,
+        }
+        for e in entries
+    ]
+
+
+@app.get("/errors/summary")
+def errors_summary() -> dict[str, dict[str, int]]:
+    """Aggregate errors by category and severity."""
+    ctx = _get_ctx()
+    summary: dict[str, dict[str, int]] = ctx.error_store.summary()
+    return summary
+
+
+@app.patch("/errors/{error_id}")
+def errors_resolve(error_id: str) -> dict[str, Any]:
+    """Mark error as resolved."""
+    ctx = _get_ctx()
+    ok = ctx.error_store.mark_resolved(error_id)
+    if not ok:
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=404, detail="Error not found")
+    return {"error_id": error_id, "resolved": True}
+
+
+@app.get("/runs")
+def runs(
+    failed: bool = False,
+    type: str | None = None,
+    since: str | None = None,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """Query runs. Params: failed, type, since, limit."""
+    ctx = _get_ctx()
+    entries = ctx.run_store.query(
+        failed_only=failed,
+        run_type=type,
+        since=since,
+        limit=limit,
+    )
+    return [
+        {
+            "run_id": r.run_id,
+            "timestamp": r.timestamp,
+            "type": r.type,
+            "query": r.query,
+            "trace_ids": r.trace_ids,
+            "error_ids": r.error_ids,
+            "duration_ms": r.duration_ms,
+            "success": r.success,
+            "result": r.result,
+            "model": r.model,
+            "commands_count": r.commands_count,
+        }
+        for r in entries
+    ]
+
+
+@app.get("/runs/{run_id}")
+def runs_show(run_id: str, full: bool = False) -> dict[str, Any]:
+    """Get single run. Add ?full=true for traces and errors."""
+    ctx = _get_ctx()
+    run = ctx.run_store.get_by_id(run_id)
+    if run is None:
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=404, detail="Run not found")
+    if full:
+        traces = []
+        for tid in run.trace_ids:
+            t = ctx.trace_store.get_by_trace_id(tid)
+            if t:
+                traces.append(
+                    {
+                        "trace_id": t.trace_id,
+                        "command": t.command,
+                        "path": t.path,
+                        "timing_ms": t.total_duration_ms,
+                        "exit_code": t.exit_code,
+                    }
+                )
+        errors_list = []
+        for eid in run.error_ids:
+            e = ctx.error_store.get_by_id(eid)
+            if e:
+                errors_list.append(
+                    {
+                        "error_id": e.error_id,
+                        "category": e.category,
+                        "severity": e.severity,
+                        "message": e.message,
+                        "details": e.details,
+                    }
+                )
+        return {
+            "run_id": run.run_id,
+            "type": run.type,
+            "query": run.query,
+            "model": run.model,
+            "success": run.success,
+            "duration_ms": run.duration_ms,
+            "commands_count": run.commands_count,
+            "result": run.result,
+            "traces": traces,
+            "errors": errors_list,
+        }
+    return {
+        "run_id": run.run_id,
+        "timestamp": run.timestamp,
+        "type": run.type,
+        "query": run.query,
+        "trace_ids": run.trace_ids,
+        "error_ids": run.error_ids,
+        "duration_ms": run.duration_ms,
+        "success": run.success,
+        "result": run.result,
+        "model": run.model,
+        "commands_count": run.commands_count,
+    }
+
+
 @app.post("/agent")
 def agent(req: AgentRequest) -> dict[str, Any]:
     """Run the WikiFS AI agent on a natural language query.

@@ -12,7 +12,7 @@ from server import app
 
 @pytest.fixture
 def temp_config(tmp_path: Path) -> Path:
-    """Create temp config with temp dirs for cache and traces."""
+    """Create temp config with temp dirs for cache, traces, and errors."""
     config_path = tmp_path / "config.toml"
     config_path.write_text(
         f"""
@@ -21,6 +21,9 @@ l2_db_path = "{tmp_path / "cache.db"}"
 
 [tracing]
 db_path = "{tmp_path / "traces.db"}"
+
+[errors]
+db_path = "{tmp_path / "errors.db"}"
 """
     )
     return config_path
@@ -218,6 +221,79 @@ def test_agent_invalid_request_returns_400() -> None:
     with TestClient(app) as c:
         r = c.post("/agent", json={})
     assert r.status_code in (400, 422)  # Validation error
+
+
+def test_errors_endpoint(temp_config: Path) -> None:
+    """GET /errors returns error list (possibly empty)."""
+    import server as server_module
+
+    server_module._server_ctx = None
+    from wikifs import create_interpreter_with_components
+
+    server_module._server_ctx = create_interpreter_with_components(str(temp_config))
+
+    with TestClient(app) as c:
+        r = c.get("/errors")
+    assert r.status_code == 200
+    data = r.json()
+    assert isinstance(data, list)
+
+
+def test_errors_summary_endpoint(temp_config: Path) -> None:
+    """GET /errors/summary returns aggregation."""
+    import server as server_module
+
+    server_module._server_ctx = None
+    from wikifs import create_interpreter_with_components
+
+    server_module._server_ctx = create_interpreter_with_components(str(temp_config))
+
+    with TestClient(app) as c:
+        r = c.get("/errors/summary")
+    assert r.status_code == 200
+    data = r.json()
+    assert isinstance(data, dict)
+
+
+def test_runs_endpoint(temp_config: Path) -> None:
+    """GET /runs returns run list (possibly empty)."""
+    import server as server_module
+
+    server_module._server_ctx = None
+    from wikifs import create_interpreter_with_components
+
+    server_module._server_ctx = create_interpreter_with_components(str(temp_config))
+
+    with TestClient(app) as c:
+        r = c.get("/runs")
+    assert r.status_code == 200
+    data = r.json()
+    assert isinstance(data, list)
+
+
+def test_execute_creates_run(temp_config: Path) -> None:
+    """POST /execute creates a run in RunStore."""
+    import server as server_module
+
+    server_module._server_ctx = None
+    from wikifs import create_interpreter_with_components
+
+    server_module._server_ctx = create_interpreter_with_components(str(temp_config))
+
+    with TestClient(app) as c:
+        r = c.post(
+            "/execute",
+            json={
+                "command": "ls",
+                "path": "/wiki/entities/Frankfurt_am_Main/",
+                "flags": [],
+            },
+        )
+    assert r.status_code == 200
+    runs = server_module._server_ctx.run_store.query(limit=10)
+    assert len(runs) >= 1
+    assert runs[0].type == "cli"
+    assert runs[0].commands_count == 1
 
 
 def test_cors_allows_localhost() -> None:
