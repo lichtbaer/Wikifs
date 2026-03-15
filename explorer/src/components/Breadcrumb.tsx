@@ -11,19 +11,6 @@ function splitPath(path: string): string[] {
 
 export function Breadcrumb({ path, onNavigate }: BreadcrumbProps) {
   const parts = splitPath(path);
-  if (parts.length === 0) {
-    return (
-      <div className="flex items-center gap-2">
-        <button
-          type="button"
-          onClick={() => onNavigate("/wiki/")}
-          className="text-sm text-blue-600 hover:underline"
-        >
-          /wiki
-        </button>
-      </div>
-    );
-  }
 
   const segments: { label: string; fullPath: string }[] = [];
   let acc = "";
@@ -33,38 +20,43 @@ export function Breadcrumb({ path, onNavigate }: BreadcrumbProps) {
   }
 
   return (
-    <div className="flex flex-wrap items-center gap-2">
+    <div className="flex flex-wrap items-center gap-0.5 text-xs font-mono">
       <button
         type="button"
         onClick={() => onNavigate("/wiki/")}
-        className="text-sm text-blue-600 hover:underline"
+        className="text-blue-400 hover:text-blue-300 transition-colors"
       >
-        /wiki
+        ~
       </button>
-      {segments.map((s) => (
-        <span key={s.fullPath} className="flex items-center gap-2">
-          <span className="text-gray-400">/</span>
+      {segments.map((s, idx) => (
+        <span key={s.fullPath} className="flex items-center">
+          <span className="text-slate-600 mx-0.5">/</span>
           <button
             type="button"
             onClick={() => onNavigate(s.fullPath + (s.label.includes(".") ? "" : "/"))}
-            className="text-sm text-blue-600 hover:underline"
+            className={`transition-colors ${
+              idx === segments.length - 1
+                ? "text-slate-200"
+                : "text-blue-400 hover:text-blue-300"
+            }`}
           >
             {s.label}
           </button>
         </span>
       ))}
-      <div className="ml-2">
+      {segments.length > 0 && (
         <button
           type="button"
           onClick={() => {
             const parent = segments.length > 1 ? segments[segments.length - 2]!.fullPath : "/wiki/";
             onNavigate(parent + "/");
           }}
-          className="rounded border border-gray-300 bg-white px-2 py-1 text-xs hover:bg-gray-50"
+          className="ml-2 text-slate-500 hover:text-slate-300 transition-colors"
+          title="Zurück"
         >
-          ← Back
+          ←
         </button>
-      </div>
+      )}
     </div>
   );
 }
