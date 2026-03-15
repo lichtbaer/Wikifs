@@ -161,12 +161,14 @@ class TraceContext:
         self._cache_hits += 1
         if self._current_phase is not None:
             self._current_phase.set_cache_hit(True)
+            self._current_phase.set_result("cache_hit")
 
     def record_cache_miss(self) -> None:
         """Record a cache miss."""
         self._cache_misses += 1
         if self._current_phase is not None:
             self._current_phase.set_cache_hit(False)
+            self._current_phase.set_result("cache_miss")
 
     def record_api_call(self, url: str, response_bytes: int) -> None:
         """Record an API call with URL and response size."""

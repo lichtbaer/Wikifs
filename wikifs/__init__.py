@@ -2,6 +2,7 @@
 
 __version__ = "0.1.0"
 
+from wikifs.cache import Cache, CacheConfig, CacheStats
 from wikifs.interpreter import Interpreter
 from wikifs.models import Command, CommandResponse
 from wikifs.router import RouteMatch, Router, create_default_router, normalize_path
@@ -14,6 +15,9 @@ from wikifs.tracing import (
 )
 
 __all__ = [
+    "Cache",
+    "CacheConfig",
+    "CacheStats",
     "Command",
     "CommandResponse",
     "Interpreter",
