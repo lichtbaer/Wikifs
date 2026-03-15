@@ -3,6 +3,45 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Protocol
+
+from wikifs.tracing import TraceContext
+
+
+@dataclass
+class HandlerResponse:
+    """Response from a handler."""
+
+    output: str
+    exit_code: int
+    error_type: str | None = None
+    suggestions: list[str] | None = None
+
+
+class Handler(Protocol):
+    """Base interface for all handlers."""
+
+    def handle(
+        self,
+        command: str,
+        params: dict[str, str],
+        flags: list[str],
+        pattern: str | None,
+        route: str,
+        ctx: TraceContext,
+    ) -> HandlerResponse:
+        """Handle request. Returns HandlerResponse."""
+        ...
+
+
+@dataclass
+class HandlerConfig:
+    """Configuration passed to handlers (language, limits)."""
+
+    default_language: str
+    supported_languages: list[str]
+    pagination_default_limit: int
+    pagination_max_limit: int
 
 
 @dataclass

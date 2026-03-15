@@ -102,6 +102,11 @@ def create_default_router() -> Router:
         "/wiki/entities/{name}/meta.json", "entity.get_meta"
     )
     router.register("/wiki/classes/", "classes.list_classes")
+    router.register(
+        "/wiki/classes/{class}/{segment}/",
+        "classes.list_class_segment",
+    )
     router.register("/wiki/classes/{class}/", "classes.list_class_members")
+    router.register("/wiki/search", "search.entities")
     router.register("/wiki/sparql/result.csv", "search.sparql_query")
     return router

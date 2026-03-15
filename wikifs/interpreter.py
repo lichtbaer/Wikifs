@@ -6,9 +6,9 @@ import time
 import uuid
 from typing import Any
 
-from wikifs.models import Command, CommandResponse
+from wikifs.models import Command, CommandResponse, Handler
 from wikifs.router import RouteMatch, normalize_path
-from wikifs.tracing import TraceCollector
+from wikifs.tracing import TraceCollector, TraceStore
 
 # Allowed commands and their flags
 ALLOWED_COMMANDS = {"ls", "cat", "grep", "search"}
@@ -16,7 +16,7 @@ COMMAND_FLAGS: dict[str, set[str]] = {
     "ls": {"-l"},
     "cat": set(),
     "grep": {"-i", "-c"},
-    "search": {"--type", "--limit"},
+    "search": {"--type", "--limit", "--sparql"},
 }
 
 # Path that indicates cross-entity grep (invalid for grep)
@@ -29,6 +29,39 @@ def _resolve_wikidata_alias(path: str) -> str:
     return path
 
 
+def _dispatch(
+    route: RouteMatch,
+    command: str,
+    flags: list[str],
+    pattern: str | None,
+    ctx: Any,
+    handlers: dict[str, Handler] | None,
+) -> tuple[str, int, str | None, list[str] | None]:
+    """Dispatch to handler. Returns (output, exit_code, error_type, suggestions)."""
+    if handlers is None or route.handler not in handlers:
+        return (
+            f"[stub] handler={route.handler} params={route.params!r}",
+            0,
+            None,
+            None,
+        )
+    handler = handlers[route.handler]
+    response = handler.handle(
+        command=command,
+        params=route.params,
+        flags=flags,
+        pattern=pattern,
+        route=route.handler,
+        ctx=ctx,
+    )
+    return (
+        response.output,
+        response.exit_code,
+        response.error_type,
+        response.suggestions,
+    )
+
+
 def _validate_flags(command: str, flags: list[str]) -> str | None:
     """Validate flags for command. Returns error message or None if valid."""
     allowed = COMMAND_FLAGS[command]
@@ -36,7 +69,7 @@ def _validate_flags(command: str, flags: list[str]) -> str | None:
     while i < len(flags):
         flag = flags[i]
         if flag in allowed:
-            if flag in ("--type", "--limit") and i + 1 < len(flags):
+            if flag in ("--type", "--limit", "--sparql") and i + 1 < len(flags):
                 i += 1  # Skip value
                 if flag == "--limit":
                     try:
@@ -97,9 +130,17 @@ def _dispatch_stub(route: RouteMatch) -> str:
 class Interpreter:
     """Interprets JSON commands, validates, routes, and returns CommandResponse."""
 
-    def __init__(self, router: Any, trace_collector: TraceCollector) -> None:
+    def __init__(
+        self,
+        router: Any,
+        trace_collector: TraceCollector,
+        handlers: dict[str, Handler] | None = None,
+        trace_store: TraceStore | None = None,
+    ) -> None:
         self._router = router
         self._trace_collector = trace_collector
+        self._handlers = handlers
+        self._trace_store = trace_store
 
     def execute(self, raw_input: dict[str, Any]) -> CommandResponse:
         """Execute command from raw JSON dict. Returns CommandResponse."""
@@ -124,6 +165,8 @@ class Interpreter:
             with ctx.phase("parse"):
                 pass
             trace = self._trace_collector.finish_trace(ctx, 1)
+            if self._trace_store:
+                self._trace_store.save(trace)
             timing_ms = (time.perf_counter() - start) * 1000
             return CommandResponse(
                 output=f"Error: {parsed}",
@@ -155,6 +198,8 @@ class Interpreter:
                 with ctx.phase("route"):
                     pass
                 trace = self._trace_collector.finish_trace(ctx, 1)
+                if self._trace_store:
+                    self._trace_store.save(trace)
                 timing_ms = (time.perf_counter() - start) * 1000
                 return CommandResponse(
                     output=f"Unknown command: {cmd.command}. Allowed: ls, cat, grep, search",
@@ -171,6 +216,8 @@ class Interpreter:
                 with ctx.phase("route"):
                     pass
                 trace = self._trace_collector.finish_trace(ctx, 1)
+                if self._trace_store:
+                    self._trace_store.save(trace)
                 timing_ms = (time.perf_counter() - start) * 1000
                 return CommandResponse(
                     output="Invalid path: must start with /wiki/",
@@ -187,6 +234,8 @@ class Interpreter:
                 with ctx.phase("route"):
                     pass
                 trace = self._trace_collector.finish_trace(ctx, 1)
+                if self._trace_store:
+                    self._trace_store.save(trace)
                 timing_ms = (time.perf_counter() - start) * 1000
                 return CommandResponse(
                     output=flag_err,
@@ -205,6 +254,8 @@ class Interpreter:
                     with ctx.phase("route"):
                         pass
                     trace = self._trace_collector.finish_trace(ctx, 1)
+                    if self._trace_store:
+                        self._trace_store.save(trace)
                     timing_ms = (time.perf_counter() - start) * 1000
                     return CommandResponse(
                         output="Use `search` for cross-entity queries",
@@ -226,6 +277,8 @@ class Interpreter:
 
             if route is None:
                 trace = self._trace_collector.finish_trace(ctx, 2)
+                if self._trace_store:
+                    self._trace_store.save(trace)
                 timing_ms = (time.perf_counter() - start) * 1000
                 return CommandResponse(
                     output=f"Not found: {path}",
@@ -236,21 +289,35 @@ class Interpreter:
                     error_type="not_found",
                 )
 
-            # Dispatch to stub
-            output = _dispatch_stub(route)
-            trace = self._trace_collector.finish_trace(ctx, 0)
+            # Dispatch to handler
+            with ctx.phase("handler"):
+                output, exit_code, error_type, suggestions = _dispatch(
+                    route,
+                    cmd.command,
+                    cmd.flags,
+                    cmd.pattern,
+                    ctx,
+                    self._handlers,
+                )
+            trace = self._trace_collector.finish_trace(ctx, exit_code)
+            if self._trace_store:
+                self._trace_store.save(trace)
             timing_ms = (time.perf_counter() - start) * 1000
 
             return CommandResponse(
                 output=output,
-                exit_code=0,
+                exit_code=exit_code,
                 request_id=request_id,
                 trace_id=trace_id,
                 timing_ms=timing_ms,
+                error_type=error_type,
+                suggestions=suggestions,
             )
 
         except Exception as e:
             trace = self._trace_collector.finish_trace(ctx, 1)
+            if self._trace_store:
+                self._trace_store.save(trace)
             timing_ms = (time.perf_counter() - start) * 1000
             return CommandResponse(
                 output=str(e),

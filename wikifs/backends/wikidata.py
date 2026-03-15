@@ -65,6 +65,11 @@ def _search_cache_key(query: str, lang: str, limit: int) -> str:
     return f"wikidata:search:{query}:{lang}:{limit}"
 
 
+def _property_labels_cache_key(prop_ids: str, lang: str) -> str:
+    """Generate cache key for property labels."""
+    return f"wikidata:property_labels:{prop_ids}:{lang}"
+
+
 def _http_get(
     url: str,
     config: ApiConfig,
@@ -152,14 +157,15 @@ def _parse_entity_from_search(item: dict[str, Any], lang: str) -> SearchResult:
     )
 
 
-def _parse_entity_data(raw: dict[str, Any], entity_id: str) -> WikidataEntity:
+def _parse_entity_data(
+    raw: dict[str, Any], entity_id: str, lang: str = "de"
+) -> WikidataEntity:
     """Parse EntityData JSON to WikidataEntity."""
     entities = raw.get("entities", {})
     ent = entities.get(entity_id)
     if not ent:
         raise WikidataError(f"Entity {entity_id} not in response")
 
-    lang = "de"
     labels = ent.get("labels", {})
     label = ""
     if lang in labels:
@@ -194,6 +200,7 @@ def _parse_entity_data(raw: dict[str, Any], entity_id: str) -> WikidataEntity:
             if mainsnak.get("snaktype") == "novalue":
                 continue
             datavalue = mainsnak.get("datavalue", {})
+            val_type = datavalue.get("type", "unknown")
             value = _format_claim_value(datavalue)
             qualifiers: dict[str, str] = {}
             for qid, qlist in c.get("qualifiers", {}).items():
@@ -206,6 +213,7 @@ def _parse_entity_data(raw: dict[str, Any], entity_id: str) -> WikidataEntity:
                     property_id=prop_id,
                     property_label=prop_id,
                     value=value,
+                    value_type=val_type,
                     qualifiers=qualifiers,
                     rank=rank,
                 )
@@ -403,7 +411,7 @@ class WikidataClient:
         ctx: TraceContext | None = None,
     ) -> ResolvedEntity | None:
         """Resolve entity by Wikidata ID (e.g. Q1794)."""
-        entity_data = self.get_entity(entity_id, ctx)
+        entity_data = self.get_entity(entity_id, lang=lang, ctx=ctx)
         if entity_data is None:
             return None
         wiki_title = entity_data.sitelinks.get("dewiki") or entity_data.sitelinks.get(
@@ -422,6 +430,7 @@ class WikidataClient:
     def get_entity(
         self,
         entity_id: str,
+        lang: str = "de",
         ctx: TraceContext | None = None,
     ) -> WikidataEntity | None:
         """Fetch full entity data from EntityData JSON."""
@@ -429,7 +438,7 @@ class WikidataClient:
         cached = self._cache.get(key, ctx)
         if cached is not None:
             raw = json.loads(cached)
-            return _parse_entity_data(raw, entity_id)
+            return _parse_entity_data(raw, entity_id, lang)
 
         url = f"{self._base}/wiki/Special:EntityData/{entity_id}.json"
         data = _fetch_or_cache(
@@ -437,15 +446,16 @@ class WikidataClient:
         )
         if data is None:
             return None
-        return _parse_entity_data(json.loads(data), entity_id)
+        return _parse_entity_data(json.loads(data), entity_id, lang)
 
     def get_claims(
         self,
         entity_id: str,
+        lang: str = "de",
         ctx: TraceContext | None = None,
     ) -> list[Claim]:
         """Get all claims for entity. Returns empty list if not found."""
-        entity = self.get_entity(entity_id, ctx)
+        entity = self.get_entity(entity_id, lang=lang, ctx=ctx)
         if entity is None:
             return []
         return entity.claims
@@ -457,7 +467,7 @@ class WikidataClient:
         ctx: TraceContext | None = None,
     ) -> ClaimValue | None:
         """Get formatted claim value for property. Returns None if not found."""
-        claims = self.get_claims(entity_id, ctx)
+        claims = self.get_claims(entity_id, ctx=ctx)
         for c in claims:
             if c.property_id == property_id:
                 qual_str = ", ".join(c.qualifiers.values()) if c.qualifiers else ""
@@ -468,7 +478,7 @@ class WikidataClient:
                     value=c.value,
                     formatted=formatted,
                     qualifiers=c.qualifiers,
-                    value_type="unknown",
+                    value_type=c.value_type,
                 )
         return None
 
@@ -476,10 +486,11 @@ class WikidataClient:
         self,
         entity_id: str,
         property_id: str,
+        lang: str = "de",
         ctx: TraceContext | None = None,
     ) -> list[RelationTarget]:
         """Get relation targets for property (e.g. P131 -> Hessen, Deutschland)."""
-        entity = self.get_entity(entity_id, ctx)
+        entity = self.get_entity(entity_id, lang=lang, ctx=ctx)
         if entity is None:
             return []
         targets: list[RelationTarget] = []
@@ -489,7 +500,7 @@ class WikidataClient:
             # Value is entity ID for entity-type claims
             target_id = c.value
             if target_id.startswith("Q"):
-                target_entity = self.get_entity(target_id, ctx)
+                target_entity = self.get_entity(target_id, lang=lang, ctx=ctx)
                 if target_entity:
                     wiki_title = (
                         target_entity.sitelinks.get("dewiki")
@@ -505,6 +516,46 @@ class WikidataClient:
                         )
                     )
         return targets
+
+    def get_property_labels(
+        self,
+        prop_ids: list[str],
+        lang: str = "de",
+        ctx: TraceContext | None = None,
+    ) -> dict[str, str]:
+        """Fetch labels for properties. Returns {prop_id: label}."""
+        if not prop_ids:
+            return {}
+        ids_str = "|".join(sorted(prop_ids))
+        key = _property_labels_cache_key(ids_str, lang)
+        cached = self._cache.get(key, ctx)
+        if cached is not None:
+            return cast(dict[str, str], json.loads(cached))
+
+        url = (
+            f"{self._base}/w/api.php"
+            f"?action=wbgetentities"
+            f"&ids={quote(ids_str, safe='|')}"
+            f"&props=labels"
+            f"&languages={lang}"
+            f"&format=json"
+        )
+        data_bytes = _http_get(url, self._config, ctx)
+        data = json.loads(data_bytes)
+        entities = data.get("entities", {})
+        result: dict[str, str] = {}
+        for pid in prop_ids:
+            ent = entities.get(pid)
+            if ent and isinstance(ent, dict):
+                labels = ent.get("labels", {})
+                if lang in labels and isinstance(labels[lang], dict):
+                    result[pid] = labels[lang].get("value", pid)
+                else:
+                    result[pid] = pid
+            else:
+                result[pid] = pid
+        self._cache.set(key, json.dumps(result).encode())
+        return result
 
     def search_entities(
         self,
@@ -608,7 +659,7 @@ class WikidataClient:
             else:
                 entity_id = str(x)
             if entity_id:
-                entity = self.get_entity(entity_id, ctx)
+                entity = self.get_entity(entity_id, ctx=ctx)
                 if entity:
                     wiki_title = (
                         entity.sitelinks.get("dewiki")
@@ -639,5 +690,52 @@ class WikidataClient:
             total_count=None,
             has_more=has_more,
         )
+
+    def get_class_members_by_label_range(
+        self,
+        class_id: str,
+        start_letter: str,
+        end_letter: str,
+        limit: int = 500,
+        ctx: TraceContext | None = None,
+    ) -> list[SearchResult]:
+        """Get class members whose label starts with A-end_letter (for segment listing)."""
+        if not class_id.startswith("Q"):
+            class_id = f"Q{class_id}"
+        query = (
+            "SELECT ?x ?label WHERE {"
+            f" ?x wdt:P31 wd:{class_id} ."
+            " ?x rdfs:label ?label ."
+            " FILTER(LANG(?label) = 'de')"
+            f" FILTER(UCASE(SUBSTR(?label, 1, 1)) >= '{start_letter}' "
+            f"   && UCASE(SUBSTR(?label, 1, 1)) <= '{end_letter}')"
+            f" }} LIMIT {limit}"
+        )
+        bindings = self.sparql_query(query, ctx)
+        members: list[SearchResult] = []
+        for b in bindings:
+            x = b.get("x", "")
+            if isinstance(x, str) and x.startswith("http"):
+                entity_id = x.split("/")[-1]
+            else:
+                entity_id = str(x)
+            if entity_id:
+                entity = self.get_entity(entity_id, ctx=ctx)
+                if entity:
+                    wiki_title = (
+                        entity.sitelinks.get("dewiki")
+                        or entity.sitelinks.get("enwiki", "")
+                    )
+                    if not wiki_title and entity.sitelinks:
+                        wiki_title = next(iter(entity.sitelinks.values()), "")
+                    members.append(
+                        SearchResult(
+                            entity_id=entity_id,
+                            label=entity.label,
+                            description=entity.description,
+                            wikipedia_title=wiki_title or None,
+                        )
+                    )
+        return members
 
 
