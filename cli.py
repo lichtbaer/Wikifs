@@ -2,12 +2,43 @@
 
 from __future__ import annotations
 
+import sys
+
 import click
 
-from wikifs import __version__
+from wikifs import Interpreter, __version__, create_interpreter
 from wikifs.cache import Cache, CacheConfig, CacheStats
 from wikifs.config import load_config
 from wikifs.tracing import TraceStore
+
+
+def _get_interpreter() -> Interpreter:
+    """Create interpreter with config, cache, tracing, backends, router."""
+    return create_interpreter()
+
+
+def _run_interpreter_command(
+    command: str,
+    path: str,
+    flags: list[str] | None = None,
+    pattern: str | None = None,
+) -> int:
+    """Execute command via interpreter. Output to stdout, errors to stderr. Returns exit code."""
+    interpreter = _get_interpreter()
+    raw = {
+        "command": command,
+        "path": path,
+        "flags": flags or [],
+        "pattern": pattern,
+    }
+    response = interpreter.execute(raw)
+    exit_code: int = response.exit_code
+    if exit_code == 0:
+        if response.output:
+            click.echo(response.output)
+    else:
+        click.echo(response.output, err=True)
+    return exit_code
 
 
 def _get_trace_store() -> TraceStore:
@@ -25,27 +56,59 @@ def main() -> None:
 
 
 @main.command()
-def ls() -> None:
+@click.argument("path", type=str, required=True)
+@click.option("-l", "long_format", is_flag=True, help="Long listing format")
+def ls(path: str, long_format: bool) -> None:
     """List directory contents."""
-    click.echo("Not implemented yet")
+    flags = ["-l"] if long_format else []
+    sys.exit(_run_interpreter_command("ls", path, flags=flags))
 
 
 @main.command()
-def cat() -> None:
+@click.argument("path", type=str, required=True)
+def cat(path: str) -> None:
     """Display file contents."""
-    click.echo("Not implemented yet")
+    sys.exit(_run_interpreter_command("cat", path))
 
 
 @main.command()
-def grep() -> None:
+@click.argument("pattern", type=str, required=True)
+@click.argument("path", type=str, required=True)
+@click.option("-i", "ignore_case", is_flag=True, help="Ignore case")
+@click.option("-c", "count_only", is_flag=True, help="Count matches only")
+def grep(pattern: str, path: str, ignore_case: bool, count_only: bool) -> None:
     """Search within files."""
-    click.echo("Not implemented yet")
+    flags = []
+    if ignore_case:
+        flags.append("-i")
+    if count_only:
+        flags.append("-c")
+    sys.exit(_run_interpreter_command("grep", path, flags=flags, pattern=pattern))
 
 
 @main.command()
-def search() -> None:
-    """Search across entities."""
-    click.echo("Not implemented yet")
+@click.argument("query", type=str, required=False, default="")
+@click.option("--type", "search_type", type=str, default="entity", help="Search type (entity)")
+@click.option("--limit", type=int, default=None, help="Max results")
+@click.option("--sparql", type=str, default=None, help="SPARQL query")
+def search(
+    query: str,
+    search_type: str,
+    limit: int | None,
+    sparql: str | None,
+) -> None:
+    """Search across entities or run SPARQL query."""
+    flags: list[str] = ["--type", search_type]
+    if limit is not None:
+        flags.extend(["--limit", str(limit)])
+    if sparql:
+        flags.extend(["--sparql", sparql])
+        path = "/wiki/sparql/result.csv"
+        pattern = None
+    else:
+        path = "/wiki/search"
+        pattern = query
+    sys.exit(_run_interpreter_command("search", path, flags=flags, pattern=pattern))
 
 
 @main.command()
