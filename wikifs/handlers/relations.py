@@ -30,6 +30,14 @@ def _entity_resolve(
     return (None, None, result.suggestions or [])
 
 
+# Common relation aliases (English) for demo/CLI compatibility across languages
+RELATION_ALIASES: dict[str, str] = {
+    "part_of": "P361",
+    "country": "P17",
+    "located_in": "P131",
+}
+
+
 def _prop_label_to_filename(label: str, property_id: str, seen: set[str]) -> str:
     """Convert property label to directory name."""
     base = label.replace(" ", "_").lower()
@@ -151,10 +159,16 @@ class RelationsHandler:
         labels = self._wikidata.get_property_labels(prop_ids, lang=lang, ctx=ctx)
         relation_name_base = relation_name.rstrip("/").lower()
         matched_prop_id: str | None = None
+        resolved_pid = RELATION_ALIASES.get(relation_name_base)
         for pid in prop_ids:
             label = labels.get(pid, pid)
             dirname = label.replace(" ", "_").lower()
-            if dirname == relation_name_base or f"{dirname}_{pid}" == relation_name_base:
+            pid_match = resolved_pid and pid.upper() == resolved_pid.upper()
+            if (
+                dirname == relation_name_base
+                or f"{dirname}_{pid}" == relation_name_base
+                or pid_match
+            ):
                 matched_prop_id = pid
                 break
         if matched_prop_id is None:

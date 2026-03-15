@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING
 
 from wikifs.backends.wikidata import WikidataClient
@@ -78,6 +79,23 @@ class ArticleHandler:
             )
         entity = self._wikidata.get_entity(entity_id, lang=lang, ctx=ctx)
         title = wiki_title or (entity.label.replace(" ", "_") if entity else name)
+
+        if command == "grep":
+            if route == "article.get_article":
+                return self._handle_grep_article(title, lang, ctx, flags, pattern)
+            if route == "article.get_article_lang":
+                article_lang = params.get("lang", "en")
+                if article_lang in self._config.supported_languages:
+                    return self._handle_grep_article(
+                        title, article_lang, ctx, flags, pattern
+                    )
+            if route == "article.get_summary":
+                return self._handle_grep_summary(title, lang, ctx, flags, pattern)
+            if route == "article.get_section":
+                section_name = params.get("section", "")
+                return self._handle_grep_section(
+                    title, section_name, lang, ctx, flags, pattern
+                )
 
         if route == "article.get_article":
             return self._handle_article(title, lang, ctx)
@@ -193,4 +211,110 @@ class ArticleHandler:
         return HandlerResponse(
             output=format_file_content(section.markdown, f"{section.title}.md"),
             exit_code=0,
+        )
+
+    def _grep_in_content(
+        self,
+        content: str,
+        fname: str,
+        pattern: str | None,
+        flags: list[str],
+    ) -> HandlerResponse:
+        """Grep within content. Returns matches or count."""
+        if not pattern:
+            return HandlerResponse(
+                output=format_error("grep requires a pattern", "invalid_command"),
+                exit_code=1,
+                error_type="invalid_command",
+            )
+        case_insensitive = "-i" in flags
+        count_only = "-c" in flags
+        regex_flags = re.IGNORECASE if case_insensitive else 0
+        try:
+            regex = re.compile(re.escape(pattern), regex_flags)
+        except re.error:
+            regex = re.compile(re.escape(pattern), regex_flags)
+        matches: list[tuple[int, str]] = []
+        for i, line in enumerate(content.splitlines(), 1):
+            if regex.search(line):
+                matches.append((i, line.strip()))
+        if count_only:
+            return HandlerResponse(output=str(len(matches)), exit_code=0)
+        lines = [f"{fname}:{i}: {text}" for i, text in matches]
+        return HandlerResponse(output="\n".join(lines), exit_code=0)
+
+    def _handle_grep_article(
+        self,
+        title: str,
+        lang: str,
+        ctx: TraceContext,
+        flags: list[str],
+        pattern: str | None,
+    ) -> HandlerResponse:
+        """Grep within article.md."""
+        try:
+            content = self._wikipedia.get_article(title, lang=lang, ctx=ctx)
+        except Exception as e:
+            return HandlerResponse(
+                output=format_error(str(e), "article_not_found"),
+                exit_code=2,
+                error_type="article_not_found",
+            )
+        return self._grep_in_content(
+            content.markdown, "article.md", pattern, flags
+        )
+
+    def _handle_grep_summary(
+        self,
+        title: str,
+        lang: str,
+        ctx: TraceContext,
+        flags: list[str],
+        pattern: str | None,
+    ) -> HandlerResponse:
+        """Grep within summary.md."""
+        try:
+            summary = self._wikipedia.get_summary(title, lang=lang, ctx=ctx)
+        except Exception as e:
+            return HandlerResponse(
+                output=format_error(str(e), "article_not_found"),
+                exit_code=2,
+                error_type="article_not_found",
+            )
+        return self._grep_in_content(
+            summary.extract_markdown, "summary.md", pattern, flags
+        )
+
+    def _handle_grep_section(
+        self,
+        title: str,
+        section_name: str,
+        lang: str,
+        ctx: TraceContext,
+        flags: list[str],
+        pattern: str | None,
+    ) -> HandlerResponse:
+        """Grep within sections/{section}.md."""
+        section_name_base = section_name.replace(".md", "").strip()
+        try:
+            section = self._wikipedia.get_section(
+                title, section_name_base, lang=lang, ctx=ctx
+            )
+        except Exception as e:
+            return HandlerResponse(
+                output=format_error(str(e), "article_not_found"),
+                exit_code=2,
+                error_type="article_not_found",
+            )
+        if section is None:
+            return HandlerResponse(
+                output=format_error(
+                    f"Section not found: {section_name_base}", "not_found"
+                ),
+                exit_code=2,
+                error_type="not_found",
+            )
+        fname = f"sections/{section.title}.md"
+        return self._grep_in_content(
+            section.markdown, fname, pattern, flags
         )
