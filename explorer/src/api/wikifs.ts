@@ -1,6 +1,6 @@
 import type { CommandResponse, Stats } from "../types";
 
-const API_BASE = "http://localhost:8000";
+const API_BASE = import.meta.env.VITE_API_BASE ?? "http://localhost:8000";
 
 export async function executeCommand(
   body: { command: string; path: string; flags?: string[]; pattern?: string | null },

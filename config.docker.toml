@@ -1,0 +1,25 @@
+# Example config for Docker: mount as config.toml and set WIKIFS_CONFIG_PATH
+# or use volume ./data:/data and rely on WIKIFS_DATA_DIR=/data (no mount needed).
+[wikifs]
+default_language = "de"
+supported_languages = ["de", "en"]
+
+[cache]
+l1_max_size = 256
+l1_ttl_seconds = 3600
+l2_ttl_seconds = 86400
+l2_db_path = "/data/cache.db"
+
+[tracing]
+enabled = true
+db_path = "/data/traces.db"
+
+[api]
+wikidata_base_url = "https://www.wikidata.org"
+wikipedia_base_url = "https://{lang}.wikipedia.org"
+request_timeout_seconds = 10
+user_agent = "WikiFS/0.1 (https://github.com/Lichtbaer/wikifs)"
+
+[pagination]
+default_limit = 100
+max_limit = 500

@@ -1,0 +1,19 @@
+services:
+  api:
+    build: .
+    environment:
+      WIKIFS_DATA_DIR: /data
+    volumes:
+      - wikifs_data:/data
+    expose:
+      - "8000"
+
+  explorer:
+    build: ./explorer
+    ports:
+      - "8080:80"
+    depends_on:
+      - api
+
+volumes:
+  wikifs_data:

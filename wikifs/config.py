@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -77,4 +78,12 @@ def load_config(config_path: str | Path | None = None) -> dict[str, Any]:
                 result[key] = value
         return result
 
-    return merge(defaults, loaded)
+    result = merge(defaults, loaded)
+
+    # Docker / container: override DB paths via WIKIFS_DATA_DIR
+    data_dir = os.environ.get("WIKIFS_DATA_DIR")
+    if data_dir:
+        result.setdefault("cache", {})["l2_db_path"] = str(Path(data_dir) / "cache.db")
+        result.setdefault("tracing", {})["db_path"] = str(Path(data_dir) / "traces.db")
+
+    return result

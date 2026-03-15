@@ -98,6 +98,16 @@ python scripts/demo.py
 
 Runs the reference flow (Frankfurt → Hessen → Deutschland), shows trace summary, and a second run to demonstrate cache effect.
 
+## Docker
+
+Run API and Explorer in containers:
+
+```bash
+docker compose up --build
+```
+
+Then open [http://localhost:8080](http://localhost:8080). The Explorer UI is served by Nginx and proxies `/api` to the FastAPI backend. Cache and trace data are stored in a Docker volume (`wikifs_data`). To use a custom config, set `WIKIFS_DATA_DIR=/data` (default) and optionally mount `config.docker.toml` as the config file; the image uses `WIKIFS_DATA_DIR` to place SQLite DBs under `/data`.
+
 ## Development
 
 ```bash
