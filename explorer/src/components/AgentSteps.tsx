@@ -9,7 +9,7 @@ interface AgentStepsProps {
 export function AgentSteps({ steps, isRunning }: AgentStepsProps) {
   if (steps.length === 0 && !isRunning) {
     return (
-      <div className="rounded-lg border border-slate-700/60 bg-slate-900/60 p-6 text-center">
+      <div className="flex-1 rounded-lg border border-slate-700/60 bg-slate-900/60 p-6 text-center">
         <p className="text-sm text-slate-500">
           Keine Schritte. Stelle eine Frage an den Agenten.
         </p>
@@ -18,7 +18,7 @@ export function AgentSteps({ steps, isRunning }: AgentStepsProps) {
   }
 
   return (
-    <div className="space-y-2 max-h-[400px] overflow-y-auto">
+    <div className="flex flex-col flex-1 min-h-0 space-y-2 overflow-y-auto">
       {steps.map((step) => (
         <AgentStepCard key={step.step} step={step} />
       ))}

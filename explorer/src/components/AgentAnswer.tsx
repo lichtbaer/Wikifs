@@ -8,7 +8,7 @@ interface AgentAnswerProps {
 export function AgentAnswer({ summary }: AgentAnswerProps) {
   if (!summary) {
     return (
-      <div className="rounded-lg border border-slate-700/60 bg-slate-900/60 p-6">
+      <div className="flex-1 rounded-lg border border-slate-700/60 bg-slate-900/60 p-6">
         <p className="text-sm text-slate-500">
           Die Antwort des Agenten erscheint hier.
         </p>
@@ -19,8 +19,8 @@ export function AgentAnswer({ summary }: AgentAnswerProps) {
   const { answer, total_commands, total_duration_ms, cache_hits = 0 } = summary;
 
   return (
-    <div className="space-y-3">
-      <div className="rounded-lg border border-slate-700/60 bg-slate-900/60 p-4">
+    <div className="flex flex-col flex-1 min-h-0 gap-3">
+      <div className="flex-1 min-h-0 rounded-lg border border-slate-700/60 bg-slate-900/60 p-4 overflow-y-auto">
         <h3 className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-2">
           Agent-Antwort
         </h3>
