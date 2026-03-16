@@ -7,13 +7,13 @@ interface AgentInputProps {
 }
 
 const MODELS = [
-  { value: "openai:gpt-4o", label: "GPT-4o" },
-  { value: "anthropic:claude-sonnet-4-20250514", label: "Claude Sonnet" },
+  { value: "openai:gpt-4.1", label: "GPT-4.1" },
+  { value: "anthropic:claude-sonnet-4-6", label: "Claude Sonnet 4.6" },
 ];
 
 export function AgentInput({ onAsk, loading }: AgentInputProps) {
   const [query, setQuery] = useState("");
-  const [model, setModel] = useState("openai:gpt-4o");
+  const [model, setModel] = useState("openai:gpt-4.1");
 
   const handleSubmit = useCallback(
     (e: React.FormEvent) => {
