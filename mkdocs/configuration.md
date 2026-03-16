@@ -59,6 +59,15 @@ Configs are merged; project root overrides user config.
 | `default_limit` | int | `100` | Default result limit for search |
 | `max_limit` | int | `500` | Maximum allowed limit |
 
+### [agent]
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `default_model` | string | `"openai:gpt-4o"` | Model for the agent (e.g. `openai:gpt-4o`, `anthropic:claude-sonnet-4-20250514`) |
+| `max_tool_calls` | int | `20` | Maximum number of tool calls per agent run |
+
+The chosen model requires the corresponding API key (e.g. `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`); see environment variables above.
+
 ## Example
 
 ```toml

@@ -2,6 +2,8 @@ site_name: WikiFS
 site_description: Virtual Filesystem over Wikipedia & Wikidata for AI Agents
 site_url: https://lichtbaer.github.io/wikifs/
 
+docs_dir: mkdocs
+
 theme:
   name: material
   language: en
@@ -21,6 +23,7 @@ nav:
     - ADRs: architecture/adrs.md
   - Configuration: configuration.md
   - Explorer UI: explorer.md
+  - Agent: agent.md
   - Observability: observability.md
   - API Reference: api.md
 
