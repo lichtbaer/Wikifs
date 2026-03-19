@@ -192,6 +192,110 @@ def _wikifs_cat(ctx: RunContext[AgentDeps], path: str) -> str:
     return result.output if result.exit_code == 0 else f"Error: {result.output}"
 
 
+def _wikifs_head(ctx: RunContext[AgentDeps], path: str, lines: int = 10) -> str:
+    """First `lines` lines of a WikiFS file (saves tokens on long articles)."""
+    deps = ctx.deps
+    deps.current_step += 1
+    step = deps.current_step
+    _emit(
+        deps,
+        AgentEvent(
+            "tool_call",
+            {"command": "head", "path": path, "step": step, "lines": lines},
+        ),
+    )
+    start = time.perf_counter()
+    raw: dict[str, object] = {
+        "command": "head",
+        "path": path,
+        "flags": ["-n", str(lines)],
+    }
+    if deps.run_id:
+        raw["run_id"] = deps.run_id
+    result = deps.interpreter.execute(raw)
+    timing_ms = (time.perf_counter() - start) * 1000
+    trace_dict: dict[str, Any] | None = None
+    if deps.trace_store and result.trace_id:
+        trace = deps.trace_store.get_by_trace_id(result.trace_id)
+        if trace:
+            trace_dict = _trace_to_dict(trace)
+    deps.commands_executed.append(
+        CommandExecuted(
+            command="head",
+            path=path,
+            timing_ms=timing_ms,
+            trace_id=result.trace_id,
+            exit_code=result.exit_code,
+        )
+    )
+    _emit(
+        deps,
+        AgentEvent(
+            "tool_result",
+            {
+                "step": step,
+                "output": result.output,
+                "exit_code": result.exit_code,
+                "timing_ms": timing_ms,
+                "trace": trace_dict,
+            },
+        ),
+    )
+    return result.output if result.exit_code == 0 else f"Error: {result.output}"
+
+
+def _wikifs_tail(ctx: RunContext[AgentDeps], path: str, lines: int = 10) -> str:
+    """Last `lines` lines of a WikiFS file."""
+    deps = ctx.deps
+    deps.current_step += 1
+    step = deps.current_step
+    _emit(
+        deps,
+        AgentEvent(
+            "tool_call",
+            {"command": "tail", "path": path, "step": step, "lines": lines},
+        ),
+    )
+    start = time.perf_counter()
+    raw: dict[str, object] = {
+        "command": "tail",
+        "path": path,
+        "flags": ["-n", str(lines)],
+    }
+    if deps.run_id:
+        raw["run_id"] = deps.run_id
+    result = deps.interpreter.execute(raw)
+    timing_ms = (time.perf_counter() - start) * 1000
+    trace_dict: dict[str, Any] | None = None
+    if deps.trace_store and result.trace_id:
+        trace = deps.trace_store.get_by_trace_id(result.trace_id)
+        if trace:
+            trace_dict = _trace_to_dict(trace)
+    deps.commands_executed.append(
+        CommandExecuted(
+            command="tail",
+            path=path,
+            timing_ms=timing_ms,
+            trace_id=result.trace_id,
+            exit_code=result.exit_code,
+        )
+    )
+    _emit(
+        deps,
+        AgentEvent(
+            "tool_result",
+            {
+                "step": step,
+                "output": result.output,
+                "exit_code": result.exit_code,
+                "timing_ms": timing_ms,
+                "trace": trace_dict,
+            },
+        ),
+    )
+    return result.output if result.exit_code == 0 else f"Error: {result.output}"
+
+
 def _wikifs_grep(
     ctx: RunContext[AgentDeps],
     pattern: str,
@@ -338,6 +442,8 @@ for information using filesystem-like commands.
 Available commands:
 - wikifs_ls(path): List directory contents (e.g. /wiki/entities/Berlin/)
 - wikifs_cat(path): Read file contents (e.g. article.md, properties/population.txt)
+- wikifs_head(path, lines=10): First lines only (use before cat for long articles)
+- wikifs_tail(path, lines=10): Last lines only
 - wikifs_grep(pattern, path): Search within a specific entity
 - wikifs_search(query): Search across entities to discover them
 
@@ -356,7 +462,14 @@ def _get_agent_config() -> tuple[str, int]:
     return model, max_tool_calls
 
 
-WIKIFS_TOOLS = [_wikifs_ls, _wikifs_cat, _wikifs_grep, _wikifs_search]
+WIKIFS_TOOLS = [
+    _wikifs_ls,
+    _wikifs_cat,
+    _wikifs_head,
+    _wikifs_tail,
+    _wikifs_grep,
+    _wikifs_search,
+]
 
 
 def create_wikifs_agent(

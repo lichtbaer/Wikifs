@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from wikifs.backends.wikidata import WikidataClient
 from wikifs.backends.wikipedia import WikipediaClient
 from wikifs.formatter import format_directory_listing, format_error, format_file_content
+from wikifs.head_tail import apply_head_tail
 from wikifs.models import HandlerConfig, HandlerResponse
 
 if TYPE_CHECKING:
@@ -98,7 +99,7 @@ class ArticleHandler:
                 )
 
         if route == "article.get_article":
-            return self._handle_article(title, lang, ctx)
+            return self._handle_article(title, lang, ctx, command, flags)
         if route == "article.get_article_lang":
             article_lang = params.get("lang", "en")
             if article_lang not in self._config.supported_languages:
@@ -110,14 +111,25 @@ class ArticleHandler:
                     exit_code=1,
                     error_type="invalid_path",
                 )
-            return self._handle_article(title, article_lang, ctx)
+            return self._handle_article(title, article_lang, ctx, command, flags)
         if route == "article.get_summary":
-            return self._handle_summary(title, lang, ctx)
+            return self._handle_summary(title, lang, ctx, command, flags)
         if route == "article.list_sections":
+            if command != "ls":
+                return HandlerResponse(
+                    output=format_error(
+                        "Only ls is supported for sections/ (directory listing)",
+                        "invalid_command",
+                    ),
+                    exit_code=1,
+                    error_type="invalid_command",
+                )
             return self._handle_list_sections(title, lang, ctx)
         if route == "article.get_section":
             section_name = params.get("section", "")
-            return self._handle_get_section(title, section_name, lang, ctx)
+            return self._handle_get_section(
+                title, section_name, lang, ctx, command, flags
+            )
         return HandlerResponse(
             output=format_error(f"Unknown route: {route}", "invalid_command"),
             exit_code=1,
@@ -129,8 +141,10 @@ class ArticleHandler:
         title: str,
         lang: str,
         ctx: TraceContext,
+        command: str,
+        flags: list[str],
     ) -> HandlerResponse:
-        """Handle cat article.md or article.{lang}.md."""
+        """Handle cat/head/tail article.md or article.{lang}.md."""
         try:
             content = self._wikipedia.get_article(title, lang=lang, ctx=ctx)
         except Exception as e:
@@ -139,8 +153,15 @@ class ArticleHandler:
                 exit_code=2,
                 error_type="article_not_found",
             )
+        text, err = apply_head_tail(content.markdown, command, flags)
+        if err:
+            return HandlerResponse(
+                output=format_error(err, "invalid_flag"),
+                exit_code=1,
+                error_type="invalid_flag",
+            )
         return HandlerResponse(
-            output=format_file_content(content.markdown, "article.md"),
+            output=format_file_content(text, "article.md"),
             exit_code=0,
         )
 
@@ -149,8 +170,10 @@ class ArticleHandler:
         title: str,
         lang: str,
         ctx: TraceContext,
+        command: str,
+        flags: list[str],
     ) -> HandlerResponse:
-        """Handle cat summary.md."""
+        """Handle cat/head/tail summary.md."""
         try:
             summary = self._wikipedia.get_summary(title, lang=lang, ctx=ctx)
         except Exception as e:
@@ -159,8 +182,15 @@ class ArticleHandler:
                 exit_code=2,
                 error_type="article_not_found",
             )
+        text, err = apply_head_tail(summary.extract_markdown, command, flags)
+        if err:
+            return HandlerResponse(
+                output=format_error(err, "invalid_flag"),
+                exit_code=1,
+                error_type="invalid_flag",
+            )
         return HandlerResponse(
-            output=format_file_content(summary.extract_markdown, "summary.md"),
+            output=format_file_content(text, "summary.md"),
             exit_code=0,
         )
 
@@ -189,8 +219,10 @@ class ArticleHandler:
         section_name: str,
         lang: str,
         ctx: TraceContext,
+        command: str,
+        flags: list[str],
     ) -> HandlerResponse:
-        """Handle cat sections/{section}.md."""
+        """Handle cat/head/tail sections/{section}.md."""
         section_name_base = section_name.replace(".md", "").strip()
         try:
             section = self._wikipedia.get_section(
@@ -208,8 +240,16 @@ class ArticleHandler:
                 exit_code=2,
                 error_type="not_found",
             )
+        text, err = apply_head_tail(section.markdown, command, flags)
+        if err:
+            return HandlerResponse(
+                output=format_error(err, "invalid_flag"),
+                exit_code=1,
+                error_type="invalid_flag",
+            )
+        fname = f"{section.title}.md"
         return HandlerResponse(
-            output=format_file_content(section.markdown, f"{section.title}.md"),
+            output=format_file_content(text, fname),
             exit_code=0,
         )
 

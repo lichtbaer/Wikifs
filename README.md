@@ -23,6 +23,7 @@ First command in under 5 minutes.
 | Q-ID-Pfade | `wikifs ls /wiki/entities/Q64/` (Auflösung zur Wikipedia-Überschrift, z. B. Berlin) |
 | `ls -l` | `wikifs ls -l /wiki/entities/Frankfurt_am_Main/` |
 | `cat` | `wikifs cat /wiki/entities/Frankfurt_am_Main/article.md` |
+| `head` / `tail` | `wikifs head -n 40 /wiki/entities/Frankfurt_am_Main/article.md` |
 | `cat` | `wikifs cat /wiki/entities/Frankfurt_am_Main/properties/population.txt` |
 | `grep` | `wikifs grep "Goethe" /wiki/entities/Frankfurt_am_Main/` |
 | `grep -i -c` | `wikifs grep -i -c "goethe" /wiki/entities/Frankfurt_am_Main/` |

@@ -87,6 +87,34 @@ def cat(path: str) -> None:
 
 
 @main.command()
+@click.argument("path", type=str, required=True)
+@click.option(
+    "-n",
+    "lines",
+    type=int,
+    default=10,
+    help="Number of lines from the start (default: 10)",
+)
+def head(path: str, lines: int) -> None:
+    """Print the first lines of a text file (article, summary, property, …)."""
+    sys.exit(_run_interpreter_command("head", path, flags=["-n", str(lines)]))
+
+
+@main.command()
+@click.argument("path", type=str, required=True)
+@click.option(
+    "-n",
+    "lines",
+    type=int,
+    default=10,
+    help="Number of lines from the end (default: 10)",
+)
+def tail(path: str, lines: int) -> None:
+    """Print the last lines of a text file."""
+    sys.exit(_run_interpreter_command("tail", path, flags=["-n", str(lines)]))
+
+
+@main.command()
 @click.argument("pattern", type=str, required=True)
 @click.argument("path", type=str, required=True)
 @click.option("-i", "ignore_case", is_flag=True, help="Ignore case")

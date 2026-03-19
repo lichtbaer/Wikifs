@@ -9,17 +9,20 @@ from datetime import UTC, datetime
 from typing import Any
 
 from wikifs.errors import ErrorCollector, Run, RunStore
+from wikifs.head_tail import MAX_LINES
 from wikifs.models import Command, CommandResponse, Handler
 from wikifs.router import RouteMatch, normalize_path
 from wikifs.tracing import TraceCollector, TraceContext, TraceStore
 
 # Allowed commands and their flags
-ALLOWED_COMMANDS = {"ls", "cat", "grep", "search"}
+ALLOWED_COMMANDS = {"ls", "cat", "grep", "search", "head", "tail"}
 COMMAND_FLAGS: dict[str, set[str]] = {
     "ls": {"-l"},
     "cat": set(),
     "grep": {"-i", "-c"},
-    "search": {"--type", "--limit", "--sparql"},
+    "search": {"--type", "--limit", "--sparql", "-n", "--lines"},
+    "head": {"-n", "--lines"},
+    "tail": {"-n", "--lines"},
 }
 
 # Path that indicates cross-entity grep (invalid for grep)
@@ -95,6 +98,16 @@ def _validate_flags(command: str, flags: list[str]) -> str | None:
                         int(flags[i])
                     except ValueError:
                         return f"Invalid value for --limit: {flags[i]}"
+            elif flag in ("-n", "--lines") and i + 1 < len(flags):
+                i += 1
+                try:
+                    v = int(flags[i])
+                except ValueError:
+                    return f"Invalid value for {flag}: {flags[i]}"
+                if v < 0 or v > MAX_LINES:
+                    return (
+                        f"Line count for {flag} must be between 0 and {MAX_LINES}, got {v}"
+                    )
         elif flag.startswith("--"):
             return f"Unknown flag: {flag}. Allowed for {command}: {sorted(allowed) or 'none'}"
         elif flag.startswith("-"):
@@ -323,7 +336,10 @@ class Interpreter:
                 trace = self._trace_collector.finish_trace(ctx, 1)
                 if self._trace_store:
                     self._trace_store.save(trace)
-                msg = f"Unknown command: {cmd.command}. Allowed: ls, cat, grep, search"
+                msg = (
+                    f"Unknown command: {cmd.command}. "
+                    "Allowed: ls, cat, head, tail, grep, search"
+                )
                 _record_routing_error(
                     self._error_collector,
                     trace_id,
@@ -344,7 +360,7 @@ class Interpreter:
                     trace_id=trace_id,
                     timing_ms=timing_ms,
                     error_type="invalid_command",
-                    suggestions=["ls", "cat", "grep", "search"],
+                    suggestions=["ls", "cat", "head", "tail", "grep", "search"],
                 )
 
             # Validate path prefix

@@ -1,11 +1,13 @@
 # Command Reference
 
-WikiFS provides four read-only commands that mirror familiar shell operations.
+WikiFS provides read-only commands that mirror familiar shell operations.
 
 | Command | Description |
 |---------|-------------|
 | [ls](ls.md) | List directory contents |
 | [cat](cat.md) | Display file contents |
+| [head](head.md) | First *N* lines of a file |
+| [tail](tail.md) | Last *N* lines of a file |
 | [grep](grep.md) | Search within files |
 | [search](search.md) | Search across entities or run SPARQL |
 

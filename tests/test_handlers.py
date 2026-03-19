@@ -102,6 +102,36 @@ def test_execute_rejects_unsupported_lang() -> None:
         assert "Unsupported language" in resp.output
 
 
+def test_e2e_head_summary_limited_lines() -> None:
+    """head summary.md returns at most N lines of text."""
+    with tempfile.TemporaryDirectory() as tmp:
+        interpreter = _create_interpreter(Path(tmp))
+        resp = interpreter.execute(
+            {
+                "command": "head",
+                "path": "/wiki/entities/Frankfurt_am_Main/summary.md",
+                "flags": ["-n", "4"],
+            }
+        )
+        assert resp.exit_code == 0
+        assert len(resp.output.splitlines()) <= 4
+
+
+def test_e2e_tail_article() -> None:
+    """tail article.md returns trailing lines only."""
+    with tempfile.TemporaryDirectory() as tmp:
+        interpreter = _create_interpreter(Path(tmp))
+        resp = interpreter.execute(
+            {
+                "command": "tail",
+                "path": "/wiki/entities/Berlin/article.md",
+                "flags": ["-n", "3"],
+            }
+        )
+        assert resp.exit_code == 0
+        assert len(resp.output.splitlines()) <= 3
+
+
 def test_e2e_cat_properties() -> None:
     """cat .../properties/p1082.txt returns population value (P1082=Einwohnerzahl)."""
     with tempfile.TemporaryDirectory() as tmp:

@@ -125,7 +125,7 @@ def test_interpreter_invalid_command() -> None:
     assert resp.exit_code == 1
     assert resp.error_type == "invalid_command"
     assert "Unknown command" in resp.output
-    assert resp.suggestions == ["ls", "cat", "grep", "search"]
+    assert resp.suggestions == ["ls", "cat", "head", "tail", "grep", "search"]
 
 
 def test_interpreter_invalid_path() -> None:
