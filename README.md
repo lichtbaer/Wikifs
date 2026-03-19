@@ -20,6 +20,7 @@ First command in under 5 minutes.
 | Command | Example |
 |---------|---------|
 | `ls` | `wikifs ls /wiki/entities/Frankfurt_am_Main/` |
+| Q-ID-Pfade | `wikifs ls /wiki/entities/Q64/` (Auflösung zur Wikipedia-Überschrift, z. B. Berlin) |
 | `ls -l` | `wikifs ls -l /wiki/entities/Frankfurt_am_Main/` |
 | `cat` | `wikifs cat /wiki/entities/Frankfurt_am_Main/article.md` |
 | `cat` | `wikifs cat /wiki/entities/Frankfurt_am_Main/properties/population.txt` |
@@ -34,6 +35,7 @@ First command in under 5 minutes.
 | `traces clear` | `wikifs traces clear --older-than 7` |
 | `cache stats` | `wikifs cache stats` |
 | `cache clear` | `wikifs cache clear` |
+| `doctor` | `wikifs doctor` — Pfade, Wikimedia-API, optionale Agent-Keys |
 
 ## Architecture
 
@@ -46,6 +48,11 @@ Agent → JSON Command → Interpreter → Path Router → Backend Client → Re
 ```
 
 See ADRs for design decisions.
+
+## HTTP API / Explorer
+
+- **`POST /execute`** akzeptiert optional ein Feld **`lang`** (z. B. `de`, `en`), sofern es in `supported_languages` der Konfiguration steht; überschreibt die Standard-Wikipedia-Sprache für diese Anfrage.
+- Der **Explorer** bietet eine Sprachauswahl (manueller Modus), **Observability** (letzte Traces, Fehler, Server-Cache leeren) und **Stats**.
 
 ## Configuration
 

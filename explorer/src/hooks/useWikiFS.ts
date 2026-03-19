@@ -1,4 +1,4 @@
-import { useCallback, useReducer } from "react";
+import { useCallback, useReducer, useState } from "react";
 import { executeCommand } from "../api/wikifs";
 import type { CommandResponse } from "../types";
 import { parseCommandString } from "../utils/parseCommand";
@@ -82,6 +82,7 @@ function reducer(state: State, action: Action): State {
 
 export function useWikiFS() {
   const [state, dispatch] = useReducer(reducer, initialState);
+  const [requestLang, setRequestLang] = useState("");
 
   const runCommand = useCallback(async (input: string) => {
     const trimmed = input.trim();
@@ -112,6 +113,7 @@ export function useWikiFS() {
           path: parsed.path,
           flags: parsed.flags,
           pattern: parsed.pattern,
+          ...(requestLang.trim() ? { lang: requestLang.trim() } : {}),
         },
         true
       );
@@ -125,7 +127,7 @@ export function useWikiFS() {
           : msg,
       });
     }
-  }, []);
+  }, [requestLang]);
 
   const navigateTo = useCallback((path: string) => {
     dispatch({ type: "NAVIGATE", payload: path });
@@ -147,5 +149,7 @@ export function useWikiFS() {
     navigateTo,
     setPath,
     clearApiError,
+    requestLang,
+    setRequestLang,
   };
 }

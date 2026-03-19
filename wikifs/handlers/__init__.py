@@ -35,8 +35,8 @@ def create_handlers(
     cache: Cache,
     handler_config: HandlerConfig,
     error_collector: ErrorCollector | None = None,
-) -> dict[str, Handler]:
-    """Create all handlers with shared dependencies."""
+) -> tuple[dict[str, Handler], WikidataClient]:
+    """Create all handlers with shared dependencies. Returns (handlers, wikidata)."""
     wikidata = WikidataClient(api_config, cache, error_collector)
     wikipedia = WikipediaClient(api_config, cache, error_collector)
     entity = EntityHandler(wikidata, wikipedia, handler_config)
@@ -63,4 +63,4 @@ def create_handlers(
         "classes.list_class_segment": classes,
         "search.entities": search,
         "search.sparql_query": search,
-    }
+    }, wikidata

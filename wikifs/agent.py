@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any
 
 from pydantic_ai import Agent
 from pydantic_ai.tools import RunContext
@@ -424,27 +425,30 @@ def run_agent_streaming(
         result = agent.run_sync(query, deps=deps, usage_limits=usage_limits)
         success = True
     except Exception as e:
+        err: BaseException = e
+        try:
+            _check_api_key_error(e)
+        except ValueError as ve:
+            err = ve
         if deps.error_collector:
             deps.error_collector.record(
                 category="agent",
                 severity="error",
-                message=str(e),
-                details={"exception": type(e).__name__},
+                message=str(err),
+                details={"exception": type(err).__name__},
                 run_id=run_id,
             )
-        _check_api_key_error(e)
         callback(
             AgentEvent(
                 "error",
                 {
-                    "message": str(e),
+                    "message": str(err),
                     "step": deps.current_step,
                     "category": "agent",
                 },
             )
         )
         callback(AgentEvent("done", {"run_id": run_id, "success": False}))
-        raise
     finally:
         total_duration_ms = (time.perf_counter() - start) * 1000
         if run_store:
@@ -471,6 +475,14 @@ def run_agent_streaming(
                 commands_count=len(deps.commands_executed),
             )
             run_store.insert(run)
+
+    if not success:
+        return AgentResponse(
+            answer="",
+            commands_executed=deps.commands_executed,
+            total_commands=len(deps.commands_executed),
+            total_duration_ms=total_duration_ms,
+        )
 
     answer = str(result.output) if result and result.output is not None else ""
     cache_hits = 0

@@ -75,7 +75,7 @@ class SearchHandler:
                 limit = min(int(limit_str), self._config.pagination_max_limit)
             except ValueError:
                 pass
-        lang = self._config.default_language
+        lang = ctx.effective_language(self._config.default_language)
         results = self._wikidata.search_entities(
             query, lang=lang, limit=limit, ctx=ctx
         )

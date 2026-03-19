@@ -78,7 +78,7 @@ class EntityHandler:
                 exit_code=1,
                 error_type="invalid_path",
             )
-        lang = self._config.default_language
+        lang = ctx.effective_language(self._config.default_language)
 
         if command == "grep" and route == "entity.list_entity":
             return self._handle_grep(name, flags, pattern, ctx, lang)

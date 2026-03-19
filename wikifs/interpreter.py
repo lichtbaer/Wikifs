@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import time
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
 from wikifs.errors import ErrorCollector, Run, RunStore
 from wikifs.models import Command, CommandResponse, Handler
 from wikifs.router import RouteMatch, normalize_path
-from wikifs.tracing import TraceCollector, TraceStore
+from wikifs.tracing import TraceCollector, TraceContext, TraceStore
 
 # Allowed commands and their flags
 ALLOWED_COMMANDS = {"ls", "cat", "grep", "search"}
@@ -45,12 +46,6 @@ def _record_routing_error(
         command=command,
         path=path,
     )
-
-
-def _resolve_wikidata_alias(path: str) -> str:
-    """Resolve Wikidata ID aliases (Q1794 -> entity name). Stub for WIKI-005."""
-    # Stub: no resolution yet, just return path as-is
-    return path
 
 
 def _dispatch(
@@ -162,6 +157,8 @@ class Interpreter:
         trace_store: TraceStore | None = None,
         error_collector: ErrorCollector | None = None,
         run_store: RunStore | None = None,
+        path_rewriter: Callable[[str, TraceContext], str] | None = None,
+        supported_languages: list[str] | None = None,
     ) -> None:
         self._router = router
         self._trace_collector = trace_collector
@@ -169,6 +166,8 @@ class Interpreter:
         self._trace_store = trace_store
         self._error_collector = error_collector
         self._run_store = run_store
+        self._path_rewriter = path_rewriter
+        self._supported_languages = supported_languages
 
     @property
     def trace_store(self) -> TraceStore | None:
@@ -276,6 +275,42 @@ class Interpreter:
             run_id=run_id,
         )
         trace_id = ctx._trace_id
+
+        lang_raw = raw_input.get("lang")
+        if isinstance(lang_raw, str) and lang_raw.strip():
+            lg = lang_raw.strip().lower()
+            if self._supported_languages and lg not in self._supported_languages:
+                with ctx.phase("parse"):
+                    pass
+                trace = self._trace_collector.finish_trace(ctx, 1)
+                if self._trace_store:
+                    self._trace_store.save(trace)
+                msg = (
+                    f"Unsupported language: {lg}. "
+                    f"Allowed: {', '.join(self._supported_languages)}"
+                )
+                _record_routing_error(
+                    self._error_collector,
+                    trace_id,
+                    cmd.command,
+                    cmd.path,
+                    msg,
+                    "invalid_flag",
+                )
+                if not skip_persist:
+                    self._persist_cli_run(
+                        run_id, trace_id, start, 1, msg, cmd.command, cmd.path
+                    )
+                timing_ms = (time.perf_counter() - start) * 1000
+                return CommandResponse(
+                    output=msg,
+                    exit_code=1,
+                    request_id=request_id,
+                    trace_id=trace_id,
+                    timing_ms=timing_ms,
+                    error_type="invalid_flag",
+                )
+            ctx.set_request_language(lg)
 
         try:
             with ctx.phase("parse"):
@@ -406,9 +441,10 @@ class Interpreter:
                         suggestions=["search"],
                     )
 
-            # Normalize path and resolve Wikidata alias
+            # Normalize path; optional Q-ID → Wikipedia title rewrite
             path = normalize_path(cmd.path)
-            path = _resolve_wikidata_alias(path)
+            if self._path_rewriter is not None:
+                path = self._path_rewriter(path, ctx)
 
             # Route
             with ctx.phase("route"):

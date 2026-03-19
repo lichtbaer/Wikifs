@@ -9,8 +9,9 @@ from wikifs.cache import Cache, CacheConfig
 from wikifs.config import ApiConfig, load_config
 from wikifs.handlers import create_handler_config, create_handlers
 from wikifs.interpreter import Interpreter
+from wikifs.path_aliases import rewrite_entity_qid_path
 from wikifs.router import create_default_router
-from wikifs.tracing import TraceCollector, TraceStore
+from wikifs.tracing import TraceCollector, TraceContext, TraceStore
 
 
 def _cache_config(tmp: Path) -> CacheConfig:
@@ -27,12 +28,26 @@ def _create_interpreter(tmp: Path) -> Interpreter:
     api_config = ApiConfig.from_dict(config)
     cache = Cache(_cache_config(tmp))
     handler_config = create_handler_config(config)
-    handlers = create_handlers(api_config, cache, handler_config)
+    handlers, wikidata = create_handlers(api_config, cache, handler_config)
     trace_store = TraceStore(str(tmp / "traces.db"))
     router = create_default_router()
     collector = TraceCollector()
+
+    def _path_rewriter(path: str, ctx: TraceContext) -> str:
+        return rewrite_entity_qid_path(
+            path,
+            wikidata,
+            ctx.effective_language(handler_config.default_language),
+            ctx,
+        )
+
     return Interpreter(
-        router, collector, handlers=handlers, trace_store=trace_store
+        router,
+        collector,
+        handlers=handlers,
+        trace_store=trace_store,
+        path_rewriter=_path_rewriter,
+        supported_languages=handler_config.supported_languages,
     )
 
 
@@ -54,6 +69,37 @@ def test_e2e_ls_entity() -> None:
         assert "relations/" in resp.output
         assert "sections/" in resp.output
         assert "meta.json" in resp.output
+
+
+def test_e2e_ls_entity_by_wikidata_qid() -> None:
+    """ls /wiki/entities/Q64/ resolves Berlin and lists directory."""
+    with tempfile.TemporaryDirectory() as tmp:
+        interpreter = _create_interpreter(Path(tmp))
+        resp = interpreter.execute(
+            {
+                "command": "ls",
+                "path": "/wiki/entities/Q64/",
+                "flags": [],
+            }
+        )
+        assert resp.exit_code == 0
+        assert "article.md" in resp.output
+
+
+def test_execute_rejects_unsupported_lang() -> None:
+    """Optional lang must be in supported_languages from config."""
+    with tempfile.TemporaryDirectory() as tmp:
+        interpreter = _create_interpreter(Path(tmp))
+        resp = interpreter.execute(
+            {
+                "command": "ls",
+                "path": "/wiki/entities/Frankfurt_am_Main/",
+                "flags": [],
+                "lang": "fr",
+            }
+        )
+        assert resp.exit_code == 1
+        assert "Unsupported language" in resp.output
 
 
 def test_e2e_cat_properties() -> None:

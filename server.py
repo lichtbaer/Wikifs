@@ -94,7 +94,11 @@ def execute(
     body: dict[str, Any],
     include_trace: bool = False,
 ) -> dict[str, Any]:
-    """Execute command. Returns CommandResponse as JSON. Add ?include_trace=true for full trace."""
+    """Execute command. Returns CommandResponse as JSON. Add ?include_trace=true for full trace.
+
+    Body may include optional ``lang`` (e.g. ``en``, ``de``) when it is listed in
+    ``supported_languages`` in config; overrides default Wikipedia/Wikidata language.
+    """
     ctx = _get_ctx()
     response = ctx.interpreter.execute(body)
     result: dict[str, Any] = {
@@ -341,8 +345,15 @@ def _agent_stream_generator(
             model=model,
             trace_store=trace_store,
         )
-    except Exception:
-        pass
+    except Exception as e:
+        # Fallback if an unexpected error escapes the streaming runner
+        event_queue.put(
+            AgentEvent(
+                "error",
+                {"message": str(e), "category": "stream", "exception": type(e).__name__},
+            )
+        )
+        event_queue.put(AgentEvent("done", {"success": False}))
     finally:
         event_queue.put(None)
 

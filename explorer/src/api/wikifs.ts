@@ -3,19 +3,29 @@ import type { CommandResponse, Stats } from "../types";
 const API_BASE = import.meta.env.VITE_API_BASE ?? "http://localhost:8000";
 
 export async function executeCommand(
-  body: { command: string; path: string; flags?: string[]; pattern?: string | null },
+  body: {
+    command: string;
+    path: string;
+    flags?: string[];
+    pattern?: string | null;
+    lang?: string;
+  },
   includeTrace = true
 ): Promise<CommandResponse> {
   const url = `${API_BASE}/execute${includeTrace ? "?include_trace=true" : ""}`;
+  const payload: Record<string, unknown> = {
+    command: body.command,
+    path: body.path,
+    flags: body.flags ?? [],
+    pattern: body.pattern ?? null,
+  };
+  if (body.lang?.trim()) {
+    payload.lang = body.lang.trim().toLowerCase();
+  }
   const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      command: body.command,
-      path: body.path,
-      flags: body.flags ?? [],
-      pattern: body.pattern ?? null,
-    }),
+    body: JSON.stringify(payload),
   });
   if (!res.ok) {
     throw new Error(`HTTP ${res.status}: ${res.statusText}`);
@@ -38,6 +48,73 @@ export async function checkHealth(): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+export interface TraceListItem {
+  trace_id: string;
+  command: string;
+  path: string;
+  total_duration_ms: number;
+  exit_code: number;
+  timestamp: string;
+}
+
+export interface ErrorListItem {
+  error_id: string;
+  timestamp: string;
+  category: string;
+  severity: string;
+  message: string;
+  resolved: boolean;
+}
+
+export async function fetchTraces(limit = 25): Promise<TraceListItem[]> {
+  const res = await fetch(`${API_BASE}/traces?limit=${limit}`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const data = (await res.json()) as Array<{
+    trace_id: string;
+    command: string;
+    path: string;
+    total_duration_ms: number;
+    exit_code: number;
+    timestamp: string;
+  }>;
+  return data.map((t) => ({
+    trace_id: t.trace_id,
+    command: t.command,
+    path: t.path,
+    total_duration_ms: t.total_duration_ms,
+    exit_code: t.exit_code,
+    timestamp: t.timestamp,
+  }));
+}
+
+export async function fetchErrors(limit = 25): Promise<ErrorListItem[]> {
+  const res = await fetch(`${API_BASE}/errors?limit=${limit}`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const data = (await res.json()) as Array<{
+    error_id: string;
+    timestamp: string;
+    category: string;
+    severity: string;
+    message: string;
+    resolved: boolean;
+  }>;
+  return data.map((e) => ({
+    error_id: e.error_id,
+    timestamp: e.timestamp,
+    category: e.category,
+    severity: e.severity,
+    message: e.message,
+    resolved: e.resolved,
+  }));
+}
+
+export async function clearServerCache(): Promise<number> {
+  const res = await fetch(`${API_BASE}/cache`, { method: "DELETE" });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const data = (await res.json()) as { deleted: number };
+  return data.deleted;
 }
 
 export type AgentStreamEventCallback = (event: string, data: Record<string, unknown>) => void;
