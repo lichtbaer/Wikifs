@@ -68,6 +68,8 @@ def test_e2e_ls_entity() -> None:
         assert "properties/" in resp.output
         assert "relations/" in resp.output
         assert "sections/" in resp.output
+        assert "categories/" in resp.output
+        assert "links/" in resp.output
         assert "meta.json" in resp.output
 
 
@@ -222,6 +224,50 @@ def test_e2e_search() -> None:
         )
         assert resp.exit_code == 0
         assert "Goethe" in resp.output or "Q" in resp.output
+
+
+def test_e2e_ls_categories_berlin() -> None:
+    """ls .../categories/ lists virtual category .md files."""
+    with tempfile.TemporaryDirectory() as tmp:
+        interpreter = _create_interpreter(Path(tmp))
+        resp = interpreter.execute(
+            {
+                "command": "ls",
+                "path": "/wiki/entities/Berlin/categories/",
+                "flags": [],
+            }
+        )
+        assert resp.exit_code == 0
+        assert ".md" in resp.output
+
+
+def test_e2e_cat_first_outgoing_link() -> None:
+    """cat first link under .../links/ returns target summary."""
+    with tempfile.TemporaryDirectory() as tmp:
+        interpreter = _create_interpreter(Path(tmp))
+        r1 = interpreter.execute(
+            {
+                "command": "ls",
+                "path": "/wiki/entities/Berlin/links/",
+                "flags": [],
+            }
+        )
+        assert r1.exit_code == 0
+        first = next(
+            ln.strip()
+            for ln in r1.output.splitlines()
+            if ln.strip().endswith(".md")
+        )
+        fname = first.split()[0]
+        r2 = interpreter.execute(
+            {
+                "command": "cat",
+                "path": f"/wiki/entities/Berlin/links/{fname}",
+                "flags": [],
+            }
+        )
+        assert r2.exit_code == 0
+        assert len(r2.output.strip()) > 20
 
 
 def test_e2e_entity_not_found() -> None:

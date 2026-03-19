@@ -447,6 +447,9 @@ Available commands:
 - wikifs_grep(pattern, path): Search within a specific entity
 - wikifs_search(query): Search across entities to discover them
 
+Under each entity, Wikipedia also exposes virtual folders ``categories/`` (page
+categories as ``*.md``) and ``links/`` (outgoing article links as ``*.md``).
+
 Navigate the knowledge graph to find accurate answers. Use properties
 for structured facts, relations to explore connections, and articles
 for detailed context. Always verify facts by checking multiple sources

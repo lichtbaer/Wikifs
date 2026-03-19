@@ -48,6 +48,25 @@ def test_router_match_article_lang() -> None:
     assert m.params == {"name": "Frankfurt_am_Main", "lang": "en"}
 
 
+def test_router_match_categories_and_links() -> None:
+    """Router matches categories/ and links/ paths."""
+    router = create_default_router()
+    m = router.match("/wiki/entities/Berlin/categories")
+    assert m is not None
+    assert m.handler == "page_nav.list_categories"
+    m2 = router.match("/wiki/entities/Berlin/categories/Kategorie_Test.md")
+    assert m2 is not None
+    assert m2.handler == "page_nav.get_category_md"
+    assert m2.params.get("cat") == "Kategorie_Test"
+    m3 = router.match("/wiki/entities/Berlin/links")
+    assert m3 is not None
+    assert m3.handler == "page_nav.list_links"
+    m4 = router.match("/wiki/entities/Berlin/links/Deutschland.md")
+    assert m4 is not None
+    assert m4.handler == "page_nav.get_link_md"
+    assert m4.params.get("target") == "Deutschland"
+
+
 def test_router_match_properties() -> None:
     """Router matches properties paths."""
     router = create_default_router()

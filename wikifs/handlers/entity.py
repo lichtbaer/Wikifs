@@ -21,6 +21,8 @@ ENTITY_DIR_ENTRIES = [
     ("properties/", None),
     ("relations/", None),
     ("sections/", None),
+    ("categories/", None),
+    ("links/", None),
     ("meta.json", None),
 ]
 
@@ -149,6 +151,8 @@ class EntityHandler:
                 ("properties/", f"{props_count} items"),
                 ("relations/", f"{relation_props} items"),
                 ("sections/", f"{len(sections)} items"),
+                ("categories/", "[lazy]"),
+                ("links/", "[lazy]"),
                 ("meta.json", "[cached] 0.3KB"),
             ]
         else:

@@ -23,6 +23,8 @@ All commands use paths under `/wiki/`. Paths must start with `/wiki/`.
 - `/wiki/entities/{name}/relations/` — Relation types
 - `/wiki/entities/{name}/relations/{relation}/` — Relation targets
 - `/wiki/entities/{name}/sections/` — Article sections
+- `/wiki/entities/{name}/categories/` — Wikipedia categories (each as a virtual ``.md``)
+- `/wiki/entities/{name}/links/` — Outgoing main-article links (each as a virtual ``.md``)
 - `/wiki/classes/` — Entity classes (e.g. city, country)
 - `/wiki/search` — Entity search
 - `/wiki/sparql/result.csv` — SPARQL query result
