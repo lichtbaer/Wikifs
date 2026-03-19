@@ -55,6 +55,8 @@ See ADRs for design decisions.
 ## HTTP API / Explorer
 
 - **`POST /execute`** akzeptiert optional ein Feld **`lang`** (z. B. `de`, `en`), sofern es in `supported_languages` der Konfiguration steht; überschreibt die Standard-Wikipedia-Sprache für diese Anfrage.
+- **`POST /complete`** — Pfad-Vervollständigung: Body `path` (Präfix unter `/wiki/...`), optional `lang`, optional `limit` (1–100). Antwort: `candidates` (vollständige Pfade), optional `error`. Nutzt für `…/entities/<teil>` die Wikidata-Suche; listet ansonsten wie `ls` (ohne Trace-Persistenz).
+- **`POST /execute/batch`** — mehrere Befehle in einem Request: Body `commands` (Array von `/execute`-Bodies, max. 50), optional gemeinsames **`lang`**. Antwort: `results`, `count`, `total_timing_ms`. Query `?include_trace=true` wie bei `/execute`.
 - Der **Explorer** bietet eine Sprachauswahl (manueller Modus), **Observability** (letzte Traces, Fehler, Server-Cache leeren) und **Stats**.
 
 ## Configuration

@@ -66,3 +66,12 @@ class CommandResponse:
     timing_ms: float
     error_type: str | None = None  # "entity_not_found", "invalid_command", etc.
     suggestions: list[str] | None = None  # For typos or ambiguities
+
+
+@dataclass
+class CompletionResult:
+    """Path completion suggestions for virtual WikiFS paths."""
+
+    path: str  # Echoed input prefix
+    candidates: list[str]  # Full path suggestions
+    error: str | None = None

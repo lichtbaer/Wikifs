@@ -5,16 +5,20 @@ from __future__ import annotations
 import asyncio
 import json
 import queue
+import time
 from typing import Any
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
 from wikifs import __version__, create_interpreter_with_components
 from wikifs.agent import AgentEvent, run_agent_streaming
 from wikifs.agent_models import AgentRequest
+from wikifs.models import CommandResponse
 from wikifs.tracing import TraceStats
+
+MAX_BATCH_COMMANDS = 50
 
 app = FastAPI(title="WikiFS HTTP API", version=__version__)
 
@@ -83,6 +87,29 @@ def _trace_stats_to_dict(stats: TraceStats) -> dict[str, Any]:
     }
 
 
+def _command_response_to_dict(
+    ctx: Any,
+    response: CommandResponse,
+    *,
+    include_trace: bool = False,
+) -> dict[str, Any]:
+    """Build JSON object for a single CommandResponse (same shape as POST /execute)."""
+    result: dict[str, Any] = {
+        "output": response.output,
+        "exit_code": response.exit_code,
+        "request_id": response.request_id,
+        "trace_id": response.trace_id,
+        "timing_ms": response.timing_ms,
+        "error_type": response.error_type,
+        "suggestions": response.suggestions,
+    }
+    if include_trace:
+        trace = ctx.trace_store.get_by_trace_id(response.trace_id)
+        if trace is not None:
+            result["trace"] = _trace_to_dict(trace)
+    return result
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
     """Healthcheck endpoint."""
@@ -101,20 +128,73 @@ def execute(
     """
     ctx = _get_ctx()
     response = ctx.interpreter.execute(body)
-    result: dict[str, Any] = {
-        "output": response.output,
-        "exit_code": response.exit_code,
-        "request_id": response.request_id,
-        "trace_id": response.trace_id,
-        "timing_ms": response.timing_ms,
-        "error_type": response.error_type,
-        "suggestions": response.suggestions,
+    return _command_response_to_dict(ctx, response, include_trace=include_trace)
+
+
+@app.post("/complete")
+def complete(body: dict[str, Any]) -> dict[str, Any]:
+    """Path completion for virtual WikiFS paths under ``/wiki/``.
+
+    Body: ``path`` (required prefix), optional ``lang``, optional ``limit`` (1–100).
+    Response: ``path``, ``candidates`` (full path strings), optional ``error``.
+    """
+    ctx = _get_ctx()
+    result = ctx.interpreter.complete(body)
+    out: dict[str, Any] = {"path": result.path, "candidates": result.candidates}
+    if result.error:
+        out["error"] = result.error
+    return out
+
+
+@app.post("/execute/batch")
+def execute_batch(
+    body: dict[str, Any],
+    include_trace: bool = False,
+) -> dict[str, Any]:
+    f"""Run multiple commands in order. Body: ``commands`` (array of /execute bodies).
+
+    Optional top-level ``lang`` is applied to items that omit ``lang``.
+    At most {MAX_BATCH_COMMANDS} commands per request. Response: ``results``, ``count``,
+    ``total_timing_ms``.
+    """
+    ctx = _get_ctx()
+    commands = body.get("commands")
+    if not isinstance(commands, list):
+        raise HTTPException(
+            status_code=422,
+            detail="Request body must include 'commands' as a JSON array",
+        )
+    if len(commands) > MAX_BATCH_COMMANDS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"At most {MAX_BATCH_COMMANDS} commands per batch",
+        )
+    global_lang = body.get("lang")
+    t0 = time.perf_counter()
+    results: list[dict[str, Any]] = []
+    for item in commands:
+        if not isinstance(item, dict):
+            raise HTTPException(
+                status_code=422,
+                detail="Each batch item must be a JSON object",
+            )
+        merged: dict[str, Any] = dict(item)
+        if (
+            isinstance(global_lang, str)
+            and global_lang.strip()
+            and "lang" not in merged
+        ):
+            merged["lang"] = global_lang.strip().lower()
+        response = ctx.interpreter.execute(merged)
+        results.append(
+            _command_response_to_dict(ctx, response, include_trace=include_trace)
+        )
+    total_ms = (time.perf_counter() - t0) * 1000
+    return {
+        "results": results,
+        "count": len(results),
+        "total_timing_ms": total_ms,
     }
-    if include_trace:
-        trace = ctx.trace_store.get_by_trace_id(response.trace_id)
-        if trace is not None:
-            result["trace"] = _trace_to_dict(trace)
-    return result
 
 
 @app.get("/stats")

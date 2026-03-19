@@ -63,6 +63,70 @@ Execute a command.
 
 With `?include_trace=true`, adds `trace` object with phases, durations, cache hits.
 
+### POST /complete
+
+Path completion for virtual paths under `/wiki/`.
+
+**Request body:**
+
+```json
+{
+  "path": "/wiki/cla",
+  "lang": "de",
+  "limit": 20
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `path` | string | yes | Prefix to complete (must start with `/wiki`) |
+| `lang` | string | no | Same rules as `/execute` |
+| `limit` | int | no | Max suggestions (1–100, default 50) |
+
+**Response:**
+
+```json
+{
+  "path": "/wiki/cla",
+  "candidates": ["/wiki/classes/"]
+}
+```
+
+If the prefix is invalid, `error` is set and `candidates` is empty. Under `/wiki/entities/<partial>`, candidates come from Wikidata search; otherwise listing matches `ls` on the parent path (without persisting traces).
+
+### POST /execute/batch
+
+Run several commands in one HTTP round-trip.
+
+**Request body:**
+
+```json
+{
+  "lang": "de",
+  "commands": [
+    {"command": "ls", "path": "/wiki/classes/", "flags": []},
+    {"command": "ls", "path": "/wiki/entities/Frankfurt_am_Main/", "flags": []}
+  ]
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `commands` | array | yes | Up to 50 objects, each same shape as `/execute` |
+| `lang` | string | no | Applied to items that omit `lang` |
+
+**Query parameters:** same as `/execute` (`include_trace`).
+
+**Response:**
+
+```json
+{
+  "results": [ { "...": "same as /execute" }, { "...": "..." } ],
+  "count": 2,
+  "total_timing_ms": 120.5
+}
+```
+
 ### GET /stats
 
 Aggregate trace statistics.

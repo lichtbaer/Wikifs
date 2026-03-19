@@ -11,7 +11,7 @@ from wikifs.config import ApiConfig, load_config
 from wikifs.errors import ErrorCollector, ErrorEntry, ErrorStore, Run, RunStore
 from wikifs.handlers import create_handler_config, create_handlers
 from wikifs.interpreter import Interpreter
-from wikifs.models import Command, CommandResponse
+from wikifs.models import Command, CommandResponse, CompletionResult
 from wikifs.path_aliases import rewrite_entity_qid_path
 from wikifs.router import RouteMatch, Router, create_default_router, normalize_path
 from wikifs.tracing import (
@@ -68,6 +68,8 @@ def create_interpreter(
         run_store=run_store,
         path_rewriter=_path_rewriter,
         supported_languages=handler_config.supported_languages,
+        wikidata=wikidata,
+        default_language=handler_config.default_language,
     )
 
 
@@ -126,6 +128,8 @@ def create_interpreter_with_components(
         run_store=run_store,
         path_rewriter=_path_rewriter_srv,
         supported_languages=handler_config.supported_languages,
+        wikidata=wikidata,
+        default_language=handler_config.default_language,
     )
     return ServerContext(
         interpreter=interpreter,
@@ -143,6 +147,7 @@ __all__ = [
     "CacheStats",
     "Command",
     "CommandResponse",
+    "CompletionResult",
     "ErrorCollector",
     "ErrorEntry",
     "ErrorStore",
