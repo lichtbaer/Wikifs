@@ -12,6 +12,7 @@ from wikifs.errors import ErrorCollector
 from wikifs.handlers.article import ArticleHandler
 from wikifs.handlers.classes import ClassesHandler
 from wikifs.handlers.entity import EntityHandler
+from wikifs.handlers.page_nav import PageNavHandler
 from wikifs.handlers.properties import PropertiesHandler
 from wikifs.handlers.relations import RelationsHandler
 from wikifs.handlers.search import SearchHandler
@@ -35,8 +36,8 @@ def create_handlers(
     cache: Cache,
     handler_config: HandlerConfig,
     error_collector: ErrorCollector | None = None,
-) -> dict[str, Handler]:
-    """Create all handlers with shared dependencies."""
+) -> tuple[dict[str, Handler], WikidataClient]:
+    """Create all handlers with shared dependencies. Returns (handlers, wikidata)."""
     wikidata = WikidataClient(api_config, cache, error_collector)
     wikipedia = WikipediaClient(api_config, cache, error_collector)
     entity = EntityHandler(wikidata, wikipedia, handler_config)
@@ -45,6 +46,7 @@ def create_handlers(
     article = ArticleHandler(wikidata, wikipedia, handler_config)
     classes = ClassesHandler(wikidata, wikipedia, handler_config)
     search = SearchHandler(wikidata, wikipedia, handler_config)
+    page_nav = PageNavHandler(wikidata, wikipedia, handler_config)
     return {
         "entity.list_entity": entity,
         "entity.get_meta": entity,
@@ -63,4 +65,8 @@ def create_handlers(
         "classes.list_class_segment": classes,
         "search.entities": search,
         "search.sparql_query": search,
-    }
+        "page_nav.list_categories": page_nav,
+        "page_nav.get_category_md": page_nav,
+        "page_nav.list_links": page_nav,
+        "page_nav.get_link_md": page_nav,
+    }, wikidata

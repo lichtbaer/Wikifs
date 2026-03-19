@@ -101,6 +101,22 @@ def create_default_router() -> Router:
     router.register(
         "/wiki/entities/{name}/meta.json", "entity.get_meta"
     )
+    router.register(
+        "/wiki/entities/{name}/categories/{cat}.md",
+        "page_nav.get_category_md",
+    )
+    router.register(
+        "/wiki/entities/{name}/categories/",
+        "page_nav.list_categories",
+    )
+    router.register(
+        "/wiki/entities/{name}/links/{target}.md",
+        "page_nav.get_link_md",
+    )
+    router.register(
+        "/wiki/entities/{name}/links/",
+        "page_nav.list_links",
+    )
     router.register("/wiki/classes/", "classes.list_classes")
     router.register(
         "/wiki/classes/{class}/{segment}/",

@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, cast
 from wikifs.backends.wikidata import WikidataClient
 from wikifs.backends.wikipedia import WikipediaClient
 from wikifs.formatter import format_directory_listing, format_error
+from wikifs.head_tail import apply_head_tail
 from wikifs.models import HandlerConfig, HandlerResponse
 
 if TYPE_CHECKING:
@@ -20,6 +21,8 @@ ENTITY_DIR_ENTRIES = [
     ("properties/", None),
     ("relations/", None),
     ("sections/", None),
+    ("categories/", None),
+    ("links/", None),
     ("meta.json", None),
 ]
 
@@ -78,12 +81,12 @@ class EntityHandler:
                 exit_code=1,
                 error_type="invalid_path",
             )
-        lang = self._config.default_language
+        lang = ctx.effective_language(self._config.default_language)
 
         if command == "grep" and route == "entity.list_entity":
             return self._handle_grep(name, flags, pattern, ctx, lang)
-        if command == "cat" and route == "entity.get_meta":
-            return self._handle_meta(name, ctx, lang)
+        if command in ("cat", "head", "tail") and route == "entity.get_meta":
+            return self._handle_meta(name, ctx, lang, command, flags)
         if command == "ls" and route == "entity.list_entity":
             return self._handle_ls(name, flags, ctx, lang)
         return HandlerResponse(
@@ -148,6 +151,8 @@ class EntityHandler:
                 ("properties/", f"{props_count} items"),
                 ("relations/", f"{relation_props} items"),
                 ("sections/", f"{len(sections)} items"),
+                ("categories/", "[lazy]"),
+                ("links/", "[lazy]"),
                 ("meta.json", "[cached] 0.3KB"),
             ]
         else:
@@ -160,8 +165,10 @@ class EntityHandler:
         name: str,
         ctx: TraceContext,
         lang: str,
+        command: str,
+        flags: list[str],
     ) -> HandlerResponse:
-        """Handle cat /wiki/entities/{name}/meta.json."""
+        """Handle cat/head/tail /wiki/entities/{name}/meta.json."""
         entity_id, wiki_title, suggestions = _entity_resolve(
             self._wikidata, name, lang, ctx
         )
@@ -192,7 +199,15 @@ class EntityHandler:
             "aliases": entity.aliases,
             "last_modified": entity.last_modified,
         }
-        return HandlerResponse(output=json.dumps(meta, indent=2), exit_code=0)
+        raw = json.dumps(meta, indent=2)
+        text, err = apply_head_tail(raw, command, flags)
+        if err:
+            return HandlerResponse(
+                output=format_error(err, "invalid_flag"),
+                exit_code=1,
+                error_type="invalid_flag",
+            )
+        return HandlerResponse(output=text, exit_code=0)
 
     def _handle_grep(
         self,

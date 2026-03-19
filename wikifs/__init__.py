@@ -12,10 +12,12 @@ from wikifs.errors import ErrorCollector, ErrorEntry, ErrorStore, Run, RunStore
 from wikifs.handlers import create_handler_config, create_handlers
 from wikifs.interpreter import Interpreter
 from wikifs.models import Command, CommandResponse
+from wikifs.path_aliases import rewrite_entity_qid_path
 from wikifs.router import RouteMatch, Router, create_default_router, normalize_path
 from wikifs.tracing import (
     Trace,
     TraceCollector,
+    TraceContext,
     TracePhase,
     TraceStats,
     TraceStore,
@@ -44,7 +46,15 @@ def create_interpreter(
         error_collector=error_collector,
     )
     handler_config = create_handler_config(config)
-    handlers = create_handlers(api_config, cache, handler_config, error_collector)
+    handlers, wikidata = create_handlers(
+        api_config, cache, handler_config, error_collector
+    )
+
+    def _path_rewriter(path: str, ctx: TraceContext) -> str:
+        return rewrite_entity_qid_path(
+            path, wikidata, ctx.effective_language(handler_config.default_language), ctx
+        )
+
     trace_cfg = config.get("tracing", {})
     trace_store = TraceStore(str(trace_cfg.get("db_path", "~/.wikifs/traces.db")))
     router = create_default_router()
@@ -56,6 +66,8 @@ def create_interpreter(
         trace_store=trace_store,
         error_collector=error_collector,
         run_store=run_store,
+        path_rewriter=_path_rewriter,
+        supported_languages=handler_config.supported_languages,
     )
 
 
@@ -92,7 +104,15 @@ def create_interpreter_with_components(
         error_collector=error_collector,
     )
     handler_config = create_handler_config(config)
-    handlers = create_handlers(api_config, cache, handler_config, error_collector)
+    handlers, wikidata = create_handlers(
+        api_config, cache, handler_config, error_collector
+    )
+
+    def _path_rewriter_srv(path: str, ctx: TraceContext) -> str:
+        return rewrite_entity_qid_path(
+            path, wikidata, ctx.effective_language(handler_config.default_language), ctx
+        )
+
     trace_cfg = config.get("tracing", {})
     trace_store = TraceStore(str(trace_cfg.get("db_path", "~/.wikifs/traces.db")))
     router = create_default_router()
@@ -104,6 +124,8 @@ def create_interpreter_with_components(
         trace_store=trace_store,
         error_collector=error_collector,
         run_store=run_store,
+        path_rewriter=_path_rewriter_srv,
+        supported_languages=handler_config.supported_languages,
     )
     return ServerContext(
         interpreter=interpreter,

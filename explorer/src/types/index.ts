@@ -52,7 +52,7 @@ export interface Stats {
 
 /** Parsed command for API */
 export interface ApiCommand {
-  command: "ls" | "cat" | "grep" | "search";
+  command: "ls" | "cat" | "head" | "tail" | "grep" | "search";
   path: string;
   flags: string[];
   pattern?: string | null;

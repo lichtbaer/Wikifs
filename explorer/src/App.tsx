@@ -7,6 +7,7 @@ import { OutputPanel } from "./components/OutputPanel";
 import { TraceTimeline } from "./components/TraceTimeline";
 import { Breadcrumb } from "./components/Breadcrumb";
 import { StatsView } from "./components/StatsView";
+import { ObservabilityView } from "./components/ObservabilityView";
 import { AgentPanel } from "./components/AgentPanel";
 import type { Stats } from "./types";
 
@@ -27,9 +28,12 @@ function App() {
     runCommand,
     navigateTo,
     clearApiError,
+    requestLang,
+    setRequestLang,
   } = useWikiFS();
 
   const [showStats, setShowStats] = useState(false);
+  const [showObservability, setShowObservability] = useState(false);
   const [stats, setStats] = useState<Stats | null>(null);
   const [statsLoading, setStatsLoading] = useState(false);
   const [serverOnline, setServerOnline] = useState<boolean | null>(null);
@@ -112,6 +116,13 @@ function App() {
           </div>
           <button
             type="button"
+            onClick={() => setShowObservability(true)}
+            className="rounded-full border border-slate-600 bg-slate-800 px-3 py-1 text-xs text-slate-300 hover:bg-slate-700 hover:text-slate-100 transition-colors"
+          >
+            ◈ Observability
+          </button>
+          <button
+            type="button"
             onClick={() => setShowStats(true)}
             className="rounded-full border border-slate-600 bg-slate-800 px-3 py-1 text-xs text-slate-300 hover:bg-slate-700 hover:text-slate-100 transition-colors"
           >
@@ -157,6 +168,20 @@ function App() {
               <div className="mb-2">
                 <Breadcrumb path={currentPath} onNavigate={navigateTo} />
               </div>
+              <div className="mb-2 flex flex-wrap items-center gap-2">
+                <label className="text-[10px] uppercase tracking-wider text-slate-500 shrink-0">
+                  Wikipedia-Sprache
+                </label>
+                <select
+                  value={requestLang}
+                  onChange={(e) => setRequestLang(e.target.value)}
+                  className="rounded border border-slate-600 bg-slate-950 px-2 py-1 text-xs text-slate-200 focus:border-blue-500/60 focus:outline-none"
+                >
+                  <option value="">Standard (config)</option>
+                  <option value="de">de</option>
+                  <option value="en">en</option>
+                </select>
+              </div>
               <CommandInput onRun={runCommand} loading={loading} history={history} />
               <div className="mt-2">
                 <QuickActions onRun={runCommand} loading={loading} />
@@ -197,6 +222,10 @@ function App() {
           loading={statsLoading}
           onClose={() => setShowStats(false)}
         />
+      )}
+
+      {showObservability && (
+        <ObservabilityView onClose={() => setShowObservability(false)} />
       )}
     </div>
   );

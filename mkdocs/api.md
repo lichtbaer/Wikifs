@@ -35,9 +35,9 @@ Execute a command.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `command` | string | yes | `ls`, `cat`, `grep`, or `search` |
+| `command` | string | yes | `ls`, `cat`, `head`, `tail`, `grep`, or `search` |
 | `path` | string | yes | Path (must start with `/wiki/`) |
-| `flags` | array | no | e.g. `["-l"]`, `["--limit", "5"]` |
+| `flags` | array | no | e.g. `["-l"]`, `["--limit", "5"]`, `["-n", "20"]` for head/tail |
 | `pattern` | string | no | For grep: search pattern. For search: query string. |
 | `request_id` | string | no | Client-provided ID (UUID) |
 

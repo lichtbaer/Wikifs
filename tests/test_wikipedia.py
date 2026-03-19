@@ -195,6 +195,31 @@ def test_trace_integration() -> None:
         assert trace.api_calls >= 1 or trace.cache_hits >= 1
 
 
+def test_get_page_categories_berlin() -> None:
+    """MediaWiki API: categories on de:Berlin."""
+    with tempfile.TemporaryDirectory() as tmp:
+        cfg = _cache_config(Path(tmp))
+        cache = Cache(cfg)
+        api_cfg = _api_config()
+        client = WikipediaClient(api_cfg, cache)
+        cats = client.get_page_categories("Berlin", "de")
+        assert isinstance(cats, list)
+        assert len(cats) >= 1
+        assert any("Berlin" in c or "berlin" in c.lower() for c in cats)
+
+
+def test_get_page_links_berlin() -> None:
+    """MediaWiki API: main-namespace links from de:Berlin."""
+    with tempfile.TemporaryDirectory() as tmp:
+        cfg = _cache_config(Path(tmp))
+        cache = Cache(cfg)
+        api_cfg = _api_config()
+        client = WikipediaClient(api_cfg, cache)
+        links = client.get_page_links("Berlin", "de")
+        assert isinstance(links, list)
+        assert len(links) >= 1
+
+
 def test_http_404_structured_error() -> None:
     """HTTP 404 produces structured error, no crash."""
     with tempfile.TemporaryDirectory() as tmp:

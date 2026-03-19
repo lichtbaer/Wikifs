@@ -2,7 +2,7 @@ import type { ApiCommand } from "../types";
 
 /**
  * Parse user command string (e.g. "ls /wiki/classes/") into API format.
- * Auto-detects command type: ls, cat, grep, search.
+ * Auto-detects command type: ls, cat, head, tail, grep, search.
  */
 export function parseCommandString(input: string): ApiCommand | { error: string } {
   const trimmed = input.trim();
@@ -22,6 +22,17 @@ export function parseCommandString(input: string): ApiCommand | { error: string 
     const path = parts[1];
     if (!path) return { error: "cat benötigt einen Pfad." };
     return { command: "cat", path: normalizePath(path), flags: [] };
+  }
+
+  if (first === "head" || first === "tail") {
+    const { flags, path, error } = parseHeadTailArgs(parts, first);
+    if (error) return { error };
+    if (!path) return { error: `${first} benötigt einen Pfad.` };
+    return {
+      command: first,
+      path: normalizePath(path),
+      flags,
+    };
   }
 
   if (first === "grep") {
@@ -49,7 +60,38 @@ export function parseCommandString(input: string): ApiCommand | { error: string 
     return { command: "ls", path: normalizePath(trimmed), flags: [] };
   }
 
-  return { error: `Unbekannter Befehl: ${first}. Erlaubt: ls, cat, grep, search` };
+  return {
+    error: `Unbekannter Befehl: ${first}. Erlaubt: ls, cat, head, tail, grep, search`,
+  };
+}
+
+function parseHeadTailArgs(
+  parts: string[],
+  cmd: "head" | "tail"
+): { flags: string[]; path: string; error?: string } {
+  const flags: string[] = [];
+  let i = 1;
+  while (i < parts.length) {
+    const p = parts[i]!;
+    if (p === "-n" || p === "--lines") {
+      const v = parts[i + 1];
+      if (!v) {
+        return { flags, path: "", error: `${cmd}: Wert nach ${p} fehlt.` };
+      }
+      if (!/^\d+$/.test(v)) {
+        return { flags, path: "", error: `${cmd}: Ungültige Zeilenzahl: ${v}` };
+      }
+      flags.push(p, v);
+      i += 2;
+      continue;
+    }
+    if (p.startsWith("-")) {
+      return { flags, path: "", error: `${cmd}: Unbekannte Option ${p}` };
+    }
+    break;
+  }
+  const path = parts.slice(i).join(" ");
+  return { flags, path };
 }
 
 function normalizePath(p: string): string {

@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any
 
 from pydantic_ai import Agent
 from pydantic_ai.tools import RunContext
@@ -191,6 +192,110 @@ def _wikifs_cat(ctx: RunContext[AgentDeps], path: str) -> str:
     return result.output if result.exit_code == 0 else f"Error: {result.output}"
 
 
+def _wikifs_head(ctx: RunContext[AgentDeps], path: str, lines: int = 10) -> str:
+    """First `lines` lines of a WikiFS file (saves tokens on long articles)."""
+    deps = ctx.deps
+    deps.current_step += 1
+    step = deps.current_step
+    _emit(
+        deps,
+        AgentEvent(
+            "tool_call",
+            {"command": "head", "path": path, "step": step, "lines": lines},
+        ),
+    )
+    start = time.perf_counter()
+    raw: dict[str, object] = {
+        "command": "head",
+        "path": path,
+        "flags": ["-n", str(lines)],
+    }
+    if deps.run_id:
+        raw["run_id"] = deps.run_id
+    result = deps.interpreter.execute(raw)
+    timing_ms = (time.perf_counter() - start) * 1000
+    trace_dict: dict[str, Any] | None = None
+    if deps.trace_store and result.trace_id:
+        trace = deps.trace_store.get_by_trace_id(result.trace_id)
+        if trace:
+            trace_dict = _trace_to_dict(trace)
+    deps.commands_executed.append(
+        CommandExecuted(
+            command="head",
+            path=path,
+            timing_ms=timing_ms,
+            trace_id=result.trace_id,
+            exit_code=result.exit_code,
+        )
+    )
+    _emit(
+        deps,
+        AgentEvent(
+            "tool_result",
+            {
+                "step": step,
+                "output": result.output,
+                "exit_code": result.exit_code,
+                "timing_ms": timing_ms,
+                "trace": trace_dict,
+            },
+        ),
+    )
+    return result.output if result.exit_code == 0 else f"Error: {result.output}"
+
+
+def _wikifs_tail(ctx: RunContext[AgentDeps], path: str, lines: int = 10) -> str:
+    """Last `lines` lines of a WikiFS file."""
+    deps = ctx.deps
+    deps.current_step += 1
+    step = deps.current_step
+    _emit(
+        deps,
+        AgentEvent(
+            "tool_call",
+            {"command": "tail", "path": path, "step": step, "lines": lines},
+        ),
+    )
+    start = time.perf_counter()
+    raw: dict[str, object] = {
+        "command": "tail",
+        "path": path,
+        "flags": ["-n", str(lines)],
+    }
+    if deps.run_id:
+        raw["run_id"] = deps.run_id
+    result = deps.interpreter.execute(raw)
+    timing_ms = (time.perf_counter() - start) * 1000
+    trace_dict: dict[str, Any] | None = None
+    if deps.trace_store and result.trace_id:
+        trace = deps.trace_store.get_by_trace_id(result.trace_id)
+        if trace:
+            trace_dict = _trace_to_dict(trace)
+    deps.commands_executed.append(
+        CommandExecuted(
+            command="tail",
+            path=path,
+            timing_ms=timing_ms,
+            trace_id=result.trace_id,
+            exit_code=result.exit_code,
+        )
+    )
+    _emit(
+        deps,
+        AgentEvent(
+            "tool_result",
+            {
+                "step": step,
+                "output": result.output,
+                "exit_code": result.exit_code,
+                "timing_ms": timing_ms,
+                "trace": trace_dict,
+            },
+        ),
+    )
+    return result.output if result.exit_code == 0 else f"Error: {result.output}"
+
+
 def _wikifs_grep(
     ctx: RunContext[AgentDeps],
     pattern: str,
@@ -337,8 +442,13 @@ for information using filesystem-like commands.
 Available commands:
 - wikifs_ls(path): List directory contents (e.g. /wiki/entities/Berlin/)
 - wikifs_cat(path): Read file contents (e.g. article.md, properties/population.txt)
+- wikifs_head(path, lines=10): First lines only (use before cat for long articles)
+- wikifs_tail(path, lines=10): Last lines only
 - wikifs_grep(pattern, path): Search within a specific entity
 - wikifs_search(query): Search across entities to discover them
+
+Under each entity, Wikipedia also exposes virtual folders ``categories/`` (page
+categories as ``*.md``) and ``links/`` (outgoing article links as ``*.md``).
 
 Navigate the knowledge graph to find accurate answers. Use properties
 for structured facts, relations to explore connections, and articles
@@ -355,7 +465,14 @@ def _get_agent_config() -> tuple[str, int]:
     return model, max_tool_calls
 
 
-WIKIFS_TOOLS = [_wikifs_ls, _wikifs_cat, _wikifs_grep, _wikifs_search]
+WIKIFS_TOOLS = [
+    _wikifs_ls,
+    _wikifs_cat,
+    _wikifs_head,
+    _wikifs_tail,
+    _wikifs_grep,
+    _wikifs_search,
+]
 
 
 def create_wikifs_agent(
@@ -424,27 +541,30 @@ def run_agent_streaming(
         result = agent.run_sync(query, deps=deps, usage_limits=usage_limits)
         success = True
     except Exception as e:
+        err: BaseException = e
+        try:
+            _check_api_key_error(e)
+        except ValueError as ve:
+            err = ve
         if deps.error_collector:
             deps.error_collector.record(
                 category="agent",
                 severity="error",
-                message=str(e),
-                details={"exception": type(e).__name__},
+                message=str(err),
+                details={"exception": type(err).__name__},
                 run_id=run_id,
             )
-        _check_api_key_error(e)
         callback(
             AgentEvent(
                 "error",
                 {
-                    "message": str(e),
+                    "message": str(err),
                     "step": deps.current_step,
                     "category": "agent",
                 },
             )
         )
         callback(AgentEvent("done", {"run_id": run_id, "success": False}))
-        raise
     finally:
         total_duration_ms = (time.perf_counter() - start) * 1000
         if run_store:
@@ -471,6 +591,14 @@ def run_agent_streaming(
                 commands_count=len(deps.commands_executed),
             )
             run_store.insert(run)
+
+    if not success:
+        return AgentResponse(
+            answer="",
+            commands_executed=deps.commands_executed,
+            total_commands=len(deps.commands_executed),
+            total_duration_ms=total_duration_ms,
+        )
 
     answer = str(result.output) if result and result.output is not None else ""
     cache_hits = 0

@@ -150,6 +150,15 @@ class TraceContext:
         self._response_bytes = 0
         self._exit_code = 0
         self._current_phase: PhaseContext | None = None
+        self._request_language: str | None = None
+
+    def set_request_language(self, lang: str | None) -> None:
+        """Optional ISO language code from API/CLI for this request."""
+        self._request_language = lang.strip().lower() if lang and lang.strip() else None
+
+    def effective_language(self, default: str) -> str:
+        """Language for Wikipedia/Wikidata calls (request override or config default)."""
+        return self._request_language or default
 
     @contextmanager
     def phase(self, name: str) -> Generator[PhaseContext, None, None]:

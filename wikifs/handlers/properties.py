@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from wikifs.backends.wikidata import WikidataClient
 from wikifs.backends.wikipedia import WikipediaClient
 from wikifs.formatter import format_directory_listing, format_error, format_file_content
+from wikifs.head_tail import apply_head_tail
 from wikifs.models import HandlerConfig, HandlerResponse
 
 if TYPE_CHECKING:
@@ -80,7 +81,7 @@ class PropertiesHandler:
                 exit_code=1,
                 error_type="invalid_path",
             )
-        lang = self._config.default_language
+        lang = ctx.effective_language(self._config.default_language)
 
         entity_id, _, suggestions = _entity_resolve(
             self._wikidata, name, lang, ctx
@@ -98,12 +99,23 @@ class PropertiesHandler:
             )
 
         if route == "properties.list_properties":
+            if command != "ls":
+                return HandlerResponse(
+                    output=format_error(
+                        "Only ls is supported for properties/ (directory listing)",
+                        "invalid_command",
+                    ),
+                    exit_code=1,
+                    error_type="invalid_command",
+                )
             return self._handle_list(entity_id, ctx, lang)
         if route == "properties.get_property":
             prop = params.get("prop", "")
-            return self._handle_get_property(entity_id, prop, ctx, lang)
+            return self._handle_get_property(
+                entity_id, prop, ctx, lang, command, flags
+            )
         if route == "properties.get_all_properties":
-            return self._handle_get_all(entity_id, ctx, lang)
+            return self._handle_get_all(entity_id, ctx, lang, command, flags)
         return HandlerResponse(
             output=format_error(f"Unknown route: {route}", "invalid_command"),
             exit_code=1,
@@ -142,8 +154,10 @@ class PropertiesHandler:
         prop_name: str,
         ctx: TraceContext,
         lang: str,
+        command: str,
+        flags: list[str],
     ) -> HandlerResponse:
-        """Handle cat /wiki/entities/{name}/properties/{prop}.txt."""
+        """Handle cat/head/tail /wiki/entities/{name}/properties/{prop}.txt."""
         entity = self._wikidata.get_entity(entity_id, lang=lang, ctx=ctx)
         if entity is None:
             return HandlerResponse(
@@ -169,8 +183,15 @@ class PropertiesHandler:
                 content = c.value
                 if qual_str:
                     content = f"{c.value} ({qual_str})"
+                text, err = apply_head_tail(content, command, flags)
+                if err:
+                    return HandlerResponse(
+                        output=format_error(err, "invalid_flag"),
+                        exit_code=1,
+                        error_type="invalid_flag",
+                    )
                 return HandlerResponse(
-                    output=format_file_content(content, f"{prop_name}.txt"),
+                    output=format_file_content(text, f"{prop_name}.txt"),
                     exit_code=0,
                 )
         return HandlerResponse(
@@ -184,8 +205,10 @@ class PropertiesHandler:
         entity_id: str,
         ctx: TraceContext,
         lang: str,
+        command: str,
+        flags: list[str],
     ) -> HandlerResponse:
-        """Handle cat /wiki/entities/{name}/properties/_all.json."""
+        """Handle cat/head/tail /wiki/entities/{name}/properties/_all.json."""
         entity = self._wikidata.get_entity(entity_id, lang=lang, ctx=ctx)
         if entity is None:
             return HandlerResponse(
@@ -205,4 +228,12 @@ class PropertiesHandler:
                 "property_id": c.property_id,
                 "value_type": c.value_type,
             }
-        return HandlerResponse(output=json.dumps(result, indent=2), exit_code=0)
+        raw = json.dumps(result, indent=2)
+        text, err = apply_head_tail(raw, command, flags)
+        if err:
+            return HandlerResponse(
+                output=format_error(err, "invalid_flag"),
+                exit_code=1,
+                error_type="invalid_flag",
+            )
+        return HandlerResponse(output=text, exit_code=0)

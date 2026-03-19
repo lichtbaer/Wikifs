@@ -81,7 +81,7 @@ class RelationsHandler:
                 exit_code=1,
                 error_type="invalid_path",
             )
-        lang = self._config.default_language
+        lang = ctx.effective_language(self._config.default_language)
 
         entity_id, _, suggestions = _entity_resolve(
             self._wikidata, name, lang, ctx

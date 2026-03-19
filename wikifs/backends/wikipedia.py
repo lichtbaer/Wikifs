@@ -8,7 +8,7 @@ import unicodedata
 from contextlib import nullcontext
 from html.parser import HTMLParser
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 import requests
 from markdownify import markdownify as md
@@ -52,6 +52,20 @@ def _article_cache_key(title: str, lang: str) -> str:
 
 def _sections_cache_key(title: str, lang: str) -> str:
     return f"wikipedia:sections:{title}:{lang}"
+
+
+def _categories_cache_key(title: str, lang: str) -> str:
+    return f"wikipedia:categories:{title}:{lang}"
+
+
+def _links_cache_key(title: str, lang: str) -> str:
+    return f"wikipedia:links:{title}:{lang}"
+
+
+def _mediawiki_api_url(base_template: str, lang: str, params: dict[str, str]) -> str:
+    """Build MediaWiki action API URL (query.php)."""
+    url_base = base_template.replace("{lang}", lang).rstrip("/")
+    return f"{url_base}/w/api.php?{urlencode(params)}"
 
 
 def _build_url(base: str, lang: str, path: str, title: str) -> str:
@@ -385,6 +399,94 @@ class WikipediaClient:
         }).encode()
         self._cache.set(key, to_cache)
         return content
+
+    def get_page_categories(
+        self,
+        page_title: str,
+        lang: str = "de",
+        ctx: TraceContext | None = None,
+    ) -> list[str]:
+        """Category titles on a page (e.g. ``Kategorie:…`` / ``Category:…``), excluding hidden."""
+        key = _categories_cache_key(page_title, lang)
+        cached = self._cache.get(key, ctx)
+        if cached is not None:
+            data = json.loads(cached)
+            return list(data)
+
+        params = {
+            "action": "query",
+            "format": "json",
+            "redirects": "1",
+            "titles": page_title.replace(" ", "_"),
+            "prop": "categories",
+            "cllimit": "500",
+            "clshow": "!hidden",
+        }
+        url = _mediawiki_api_url(self._base, lang, params)
+        cm = ctx.phase("mediawiki_categories") if ctx else nullcontext()
+        with cm:
+            data_bytes, _ = _http_get(
+                url, self._config, ctx, error_collector=self._error_collector
+            )
+        payload = json.loads(data_bytes)
+        if "error" in payload:
+            raise WikipediaError(
+                f"MediaWiki API error: {payload.get('error', {})}"
+            )
+        titles: list[str] = []
+        for _pid, pg in payload.get("query", {}).get("pages", {}).items():
+            if not isinstance(pg, dict):
+                continue
+            for c in pg.get("categories", []) or []:
+                if isinstance(c, dict) and "title" in c:
+                    titles.append(str(c["title"]))
+        titles = sorted(set(titles))
+        self._cache.set(key, json.dumps(titles).encode())
+        return titles
+
+    def get_page_links(
+        self,
+        page_title: str,
+        lang: str = "de",
+        ctx: TraceContext | None = None,
+    ) -> list[str]:
+        """Outgoing main-namespace (article) links from the page."""
+        key = _links_cache_key(page_title, lang)
+        cached = self._cache.get(key, ctx)
+        if cached is not None:
+            data = json.loads(cached)
+            return list(data)
+
+        params = {
+            "action": "query",
+            "format": "json",
+            "redirects": "1",
+            "titles": page_title.replace(" ", "_"),
+            "prop": "links",
+            "plnamespace": "0",
+            "pllimit": "500",
+        }
+        url = _mediawiki_api_url(self._base, lang, params)
+        cm = ctx.phase("mediawiki_links") if ctx else nullcontext()
+        with cm:
+            data_bytes, _ = _http_get(
+                url, self._config, ctx, error_collector=self._error_collector
+            )
+        payload = json.loads(data_bytes)
+        if "error" in payload:
+            raise WikipediaError(
+                f"MediaWiki API error: {payload.get('error', {})}"
+            )
+        titles: list[str] = []
+        for _pid, pg in payload.get("query", {}).get("pages", {}).items():
+            if not isinstance(pg, dict):
+                continue
+            for ln in pg.get("links", []) or []:
+                if isinstance(ln, dict) and "title" in ln:
+                    titles.append(str(ln["title"]))
+        titles = sorted(set(titles))
+        self._cache.set(key, json.dumps(titles).encode())
+        return titles
 
     def get_sections(
         self,

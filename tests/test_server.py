@@ -223,7 +223,9 @@ def test_agent_invalid_request_returns_400() -> None:
     assert r.status_code in (400, 422)  # Validation error
 
 
-def test_agent_stream_returns_sse_events(monkeypatch: pytest.MonkeyPatch, temp_config: Path) -> None:
+def test_agent_stream_returns_sse_events(
+    monkeypatch: pytest.MonkeyPatch, temp_config: Path
+) -> None:
     """POST /agent/stream returns Server-Sent Events stream."""
     import server as server_module
 
@@ -231,8 +233,6 @@ def test_agent_stream_returns_sse_events(monkeypatch: pytest.MonkeyPatch, temp_c
     from wikifs import create_interpreter_with_components
 
     server_module._server_ctx = create_interpreter_with_components(str(temp_config))
-
-    events_received: list[tuple[str, dict]] = []
 
     def mock_run_agent_streaming(
         query: str,
@@ -245,19 +245,44 @@ def test_agent_stream_returns_sse_events(monkeypatch: pytest.MonkeyPatch, temp_c
 
         cb = callback
         if callable(cb):
-            cb(AgentEvent("agent_start", {"run_id": "test-123", "query": query, "model": "openai:gpt-4o"}))
+            cb(
+                AgentEvent(
+                    "agent_start",
+                    {"run_id": "test-123", "query": query, "model": "openai:gpt-4o"},
+                )
+            )
             cb(AgentEvent("thinking", {"message": "Planning..."}))
-            cb(AgentEvent("tool_call", {"command": "search", "path": "/wiki/search", "pattern": "Berlin", "step": 1}))
+            cb(
+                AgentEvent(
+                    "tool_call",
+                    {
+                        "command": "search",
+                        "path": "/wiki/search",
+                        "pattern": "Berlin",
+                        "step": 1,
+                    },
+                )
+            )
             cb(
                 AgentEvent(
                     "tool_result",
-                    {"step": 1, "output": "Berlin Q64", "exit_code": 0, "timing_ms": 50, "trace": None},
+                    {
+                        "step": 1,
+                        "output": "Berlin Q64",
+                        "exit_code": 0,
+                        "timing_ms": 50,
+                        "trace": None,
+                    },
                 )
             )
             cb(
                 AgentEvent(
                     "answer",
-                    {"answer": "Berlin has 3.7M inhabitants.", "total_commands": 1, "total_duration_ms": 200},
+                    {
+                        "answer": "Berlin has 3.7M inhabitants.",
+                        "total_commands": 1,
+                        "total_duration_ms": 200,
+                    },
                 )
             )
             cb(AgentEvent("done", {"run_id": "test-123", "success": True}))

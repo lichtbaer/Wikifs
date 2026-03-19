@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 from wikifs.backends.wikidata import WikidataClient
 from wikifs.backends.wikipedia import WikipediaClient
 from wikifs.formatter import format_error, format_search_results, format_sparql_csv
+from wikifs.head_tail import apply_head_tail
 from wikifs.models import HandlerConfig, HandlerResponse
 
 if TYPE_CHECKING:
@@ -45,9 +46,9 @@ class SearchHandler:
     ) -> HandlerResponse:
         """Handle search requests."""
         if route == "search.entities":
-            return self._handle_entity_search(flags, pattern, ctx)
+            return self._handle_entity_search(command, flags, pattern, ctx)
         if route == "search.sparql_query":
-            return self._handle_sparql(flags, ctx)
+            return self._handle_sparql(command, flags, ctx)
         return HandlerResponse(
             output=format_error(f"Unknown route: {route}", "invalid_command"),
             exit_code=1,
@@ -56,15 +57,25 @@ class SearchHandler:
 
     def _handle_entity_search(
         self,
+        command: str,
         flags: list[str],
         pattern: str | None,
         ctx: TraceContext,
     ) -> HandlerResponse:
-        """Handle search "Goethe" --type entity --limit 10."""
+        """Handle search/cat/head/tail on /wiki/search."""
         query = pattern or ""
         if not query.strip():
             return HandlerResponse(
                 output=format_error("Search requires a query (pattern)", "invalid_command"),
+                exit_code=1,
+                error_type="invalid_command",
+            )
+        if command not in ("search", "cat", "head", "tail"):
+            return HandlerResponse(
+                output=format_error(
+                    f"Unsupported command for /wiki/search: {command}",
+                    "invalid_command",
+                ),
                 exit_code=1,
                 error_type="invalid_command",
             )
@@ -75,7 +86,7 @@ class SearchHandler:
                 limit = min(int(limit_str), self._config.pagination_max_limit)
             except ValueError:
                 pass
-        lang = self._config.default_language
+        lang = ctx.effective_language(self._config.default_language)
         results = self._wikidata.search_entities(
             query, lang=lang, limit=limit, ctx=ctx
         )
@@ -88,14 +99,23 @@ class SearchHandler:
             for r in results
         ]
         output = format_search_results(tuples)
-        return HandlerResponse(output=output, exit_code=0)
+        slice_cmd = command if command in ("head", "tail") else "cat"
+        out, err = apply_head_tail(output, slice_cmd, flags)
+        if err:
+            return HandlerResponse(
+                output=format_error(err, "invalid_flag"),
+                exit_code=1,
+                error_type="invalid_flag",
+            )
+        return HandlerResponse(output=out, exit_code=0)
 
     def _handle_sparql(
         self,
+        command: str,
         flags: list[str],
         ctx: TraceContext,
     ) -> HandlerResponse:
-        """Handle search --sparql "SELECT ..." (cat /wiki/sparql/result.csv)."""
+        """Handle search/cat/head/tail with --sparql ( /wiki/sparql/result.csv)."""
         sparql = _get_flag_value(flags, "--sparql")
         if not sparql or not sparql.strip():
             return HandlerResponse(
@@ -106,6 +126,23 @@ class SearchHandler:
                 exit_code=1,
                 error_type="invalid_command",
             )
+        if command not in ("search", "cat", "head", "tail"):
+            return HandlerResponse(
+                output=format_error(
+                    f"Unsupported command for SPARQL path: {command}",
+                    "invalid_command",
+                ),
+                exit_code=1,
+                error_type="invalid_command",
+            )
         bindings = self._wikidata.sparql_query(sparql, ctx=ctx)
         output = format_sparql_csv(bindings)
-        return HandlerResponse(output=output, exit_code=0)
+        slice_cmd = command if command in ("head", "tail") else "cat"
+        out, err = apply_head_tail(output, slice_cmd, flags)
+        if err:
+            return HandlerResponse(
+                output=format_error(err, "invalid_flag"),
+                exit_code=1,
+                error_type="invalid_flag",
+            )
+        return HandlerResponse(output=out, exit_code=0)

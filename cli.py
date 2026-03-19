@@ -87,6 +87,34 @@ def cat(path: str) -> None:
 
 
 @main.command()
+@click.argument("path", type=str, required=True)
+@click.option(
+    "-n",
+    "lines",
+    type=int,
+    default=10,
+    help="Number of lines from the start (default: 10)",
+)
+def head(path: str, lines: int) -> None:
+    """Print the first lines of a text file (article, summary, property, …)."""
+    sys.exit(_run_interpreter_command("head", path, flags=["-n", str(lines)]))
+
+
+@main.command()
+@click.argument("path", type=str, required=True)
+@click.option(
+    "-n",
+    "lines",
+    type=int,
+    default=10,
+    help="Number of lines from the end (default: 10)",
+)
+def tail(path: str, lines: int) -> None:
+    """Print the last lines of a text file."""
+    sys.exit(_run_interpreter_command("tail", path, flags=["-n", str(lines)]))
+
+
+@main.command()
 @click.argument("pattern", type=str, required=True)
 @click.argument("path", type=str, required=True)
 @click.option("-i", "ignore_case", is_flag=True, help="Ignore case")
@@ -549,6 +577,85 @@ def agent(query: str, model: str | None, config_path: str | None) -> None:
                 click.echo(f"  {cmd.command} {cmd.path} ({cmd.timing_ms:.0f}ms)", err=True)
     except ValueError as e:
         click.echo(str(e), err=True)
+        sys.exit(1)
+
+
+@main.command()
+def doctor() -> None:
+    """Prüfe Pfade aus der Konfiguration und Erreichbarkeit der Wikimedia-APIs."""
+    import os
+    from pathlib import Path
+    from urllib.parse import quote
+
+    import requests
+
+    from wikifs.config import ApiConfig
+
+    config = load_config()
+    api = ApiConfig.from_dict(config)
+    all_ok = True
+
+    click.echo("WikiFS doctor")
+    click.echo("")
+
+    cache_cfg = config.get("cache", {})
+    trace_cfg = config.get("tracing", {})
+    err_cfg = config.get("errors", {})
+    for label, key, section in (
+        ("L2-Cache-DB", "l2_db_path", cache_cfg),
+        ("Traces-DB", "db_path", trace_cfg),
+        ("Errors/Runs-DB", "db_path", err_cfg),
+    ):
+        raw = str(section.get(key, ""))
+        p = Path(raw).expanduser()
+        parent_ok = p.parent.exists() or p.parent == p
+        click.echo(f"  {label}: {p}")
+        if not parent_ok:
+            click.echo(f"    Warnung: Verzeichnis {p.parent} fehlt", err=True)
+            all_ok = False
+
+    click.echo("")
+    click.echo("  API-Erreichbarkeit:")
+    wd_url = (
+        f"{api.wikidata_base_url.rstrip('/')}/w/api.php"
+        "?action=wbsearchentities&search=Berlin&language=en&format=json&limit=1"
+    )
+    headers = {"User-Agent": api.user_agent}
+    try:
+        r = requests.get(wd_url, headers=headers, timeout=min(8, api.request_timeout_seconds))
+        wd_ok = r.ok
+        click.echo(f"    Wikidata: {'OK' if wd_ok else f'HTTP {r.status_code}'}")
+        all_ok = all_ok and wd_ok
+    except requests.RequestException as e:
+        click.echo(f"    Wikidata: Fehler ({e})", err=True)
+        all_ok = False
+
+    wiki_url = f"https://en.wikipedia.org/api/rest_v1/page/summary/{quote('Berlin', safe='')}"
+    try:
+        r2 = requests.get(wiki_url, headers=headers, timeout=min(8, api.request_timeout_seconds))
+        wp_ok = r2.ok
+        click.echo(f"    Wikipedia (REST): {'OK' if wp_ok else f'HTTP {r2.status_code}'}")
+        all_ok = all_ok and wp_ok
+    except requests.RequestException as e:
+        click.echo(f"    Wikipedia (REST): Fehler ({e})", err=True)
+        all_ok = False
+
+    click.echo("")
+    agent_cfg = config.get("agent", {})
+    model = str(agent_cfg.get("default_model", "")).lower()
+    click.echo("  Agent / API-Keys (optional):")
+    if "openai" in model:
+        o = bool(os.environ.get("OPENAI_API_KEY"))
+        click.echo(f"    OPENAI_API_KEY: {'gesetzt' if o else 'nicht gesetzt'}")
+    if "anthropic" in model:
+        a = bool(os.environ.get("ANTHROPIC_API_KEY"))
+        click.echo(f"    ANTHROPIC_API_KEY: {'gesetzt' if a else 'nicht gesetzt'}")
+
+    click.echo("")
+    if all_ok:
+        click.echo("Ergebnis: OK")
+    else:
+        click.echo("Ergebnis: Probleme erkannt (siehe oben)", err=True)
         sys.exit(1)
 
 
