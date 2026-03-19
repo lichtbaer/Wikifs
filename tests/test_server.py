@@ -403,3 +403,114 @@ def test_cors_allows_localhost() -> None:
     assert "access-control-allow-origin" in [
         h.lower() for h in r.headers.keys()
     ] or "http://localhost:5173" in str(r.headers.get("Access-Control-Allow-Origin", ""))
+
+
+def test_complete_wiki_root_prefix(temp_config: Path) -> None:
+    """POST /complete suggests top-level /wiki/ segments."""
+    import server as server_module
+
+    server_module._server_ctx = None
+    from wikifs import create_interpreter_with_components
+
+    server_module._server_ctx = create_interpreter_with_components(str(temp_config))
+
+    with TestClient(app) as c:
+        r = c.post("/complete", json={"path": "/wiki/cla"})
+    assert r.status_code == 200
+    data = r.json()
+    assert "/wiki/classes/" in data["candidates"]
+    assert "error" not in data
+
+
+def test_complete_invalid_prefix_returns_error() -> None:
+    """POST /complete with non-wiki path returns error field."""
+    with TestClient(app) as c:
+        r = c.post("/complete", json={"path": "/etc/passwd"})
+    assert r.status_code == 200
+    data = r.json()
+    assert data.get("error")
+    assert data["candidates"] == []
+
+
+def test_execute_batch_runs_multiple_commands(temp_config: Path) -> None:
+    """POST /execute/batch returns one result per command."""
+    import server as server_module
+
+    server_module._server_ctx = None
+    from wikifs import create_interpreter_with_components
+
+    server_module._server_ctx = create_interpreter_with_components(str(temp_config))
+
+    with TestClient(app) as c:
+        r = c.post(
+            "/execute/batch",
+            json={
+                "commands": [
+                    {
+                        "command": "ls",
+                        "path": "/wiki/classes/",
+                        "flags": [],
+                    },
+                    {
+                        "command": "ls",
+                        "path": "/wiki/classes/",
+                        "flags": [],
+                    },
+                ]
+            },
+        )
+    assert r.status_code == 200
+    data = r.json()
+    assert data["count"] == 2
+    assert len(data["results"]) == 2
+    assert "total_timing_ms" in data
+    assert all(x["exit_code"] == 0 for x in data["results"])
+
+
+def test_execute_batch_applies_top_level_lang(temp_config: Path) -> None:
+    """Optional body.lang is merged into batch items without their own lang."""
+    import server as server_module
+
+    server_module._server_ctx = None
+    from wikifs import create_interpreter_with_components
+
+    server_module._server_ctx = create_interpreter_with_components(str(temp_config))
+
+    with TestClient(app) as c:
+        r = c.post(
+            "/execute/batch",
+            json={
+                "lang": "de",
+                "commands": [
+                    {
+                        "command": "ls",
+                        "path": "/wiki/entities/Frankfurt_am_Main/",
+                        "flags": [],
+                    },
+                ],
+            },
+        )
+    assert r.status_code == 200
+    assert r.json()["results"][0]["exit_code"] == 0
+
+
+def test_execute_batch_rejects_non_list_commands() -> None:
+    """POST /execute/batch returns 422 when commands is not an array."""
+    with TestClient(app) as c:
+        r = c.post("/execute/batch", json={"commands": "ls"})
+    assert r.status_code == 422
+
+
+def test_execute_batch_rejects_oversized_batch() -> None:
+    """POST /execute/batch returns 422 when too many commands."""
+    with TestClient(app) as c:
+        r = c.post(
+            "/execute/batch",
+            json={
+                "commands": [
+                    {"command": "ls", "path": "/wiki/classes/", "flags": []}
+                ]
+                * 51
+            },
+        )
+    assert r.status_code == 422

@@ -8,9 +8,10 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
+from wikifs.backends.wikidata import WikidataClient
 from wikifs.errors import ErrorCollector, Run, RunStore
 from wikifs.head_tail import MAX_LINES
-from wikifs.models import Command, CommandResponse, Handler
+from wikifs.models import Command, CommandResponse, CompletionResult, Handler
 from wikifs.router import RouteMatch, normalize_path
 from wikifs.tracing import TraceCollector, TraceContext, TraceStore
 
@@ -27,6 +28,57 @@ COMMAND_FLAGS: dict[str, set[str]] = {
 
 # Path that indicates cross-entity grep (invalid for grep)
 ENTITIES_ROOT_NORMALIZED = "/wiki/entities"
+
+# Top-level segments under /wiki/ for path completion
+WIKI_ROOT_COMPLETION_ENTRIES = ("classes/", "entities/", "search")
+
+MAX_COMPLETION_CANDIDATES = 100
+
+
+def _parse_ls_entry_names(output: str) -> list[str]:
+    """Extract entry names from ls output (plain or ls -l with tab)."""
+    names: list[str] = []
+    for line in output.splitlines():
+        line = line.strip()
+        if not line or line.startswith("Error:"):
+            continue
+        names.append(line.split("\t", 1)[0].strip())
+    return names
+
+
+def _completion_filter(names: list[str], partial: str) -> list[str]:
+    """Filter names by case-insensitive prefix when partial is non-empty."""
+    if not partial:
+        return names
+    pl = partial.lower()
+    return [n for n in names if n.lower().startswith(pl)]
+
+
+def _analyze_completion_work_path(
+    work: str, ends_with_slash: bool
+) -> tuple[str, str, str]:
+    """Classify completion context. Returns (kind, list_base, partial)."""
+    if not work.startswith("/wiki"):
+        return ("invalid", "", "")
+    if work == "/wiki":
+        return ("wiki_root", "", "")
+    rest = work[len("/wiki") :].lstrip("/")
+    if ends_with_slash:
+        return ("list_dir", work.rstrip("/") or "/wiki", "")
+    if not rest:
+        return ("wiki_root", "", "")
+    if "/" not in rest:
+        return ("wiki_root", "", rest)
+    parent, partial = work.rsplit("/", 1)
+    parent_norm = normalize_path(parent)
+    if parent_norm == ENTITIES_ROOT_NORMALIZED:
+        return ("entity_search", "", partial)
+    return ("list_dir", parent_norm, partial)
+
+
+def _join_wiki_segment(parent: str, name: str) -> str:
+    base = parent.rstrip("/")
+    return f"{base}/{name}"
 
 
 def _record_routing_error(
@@ -172,6 +224,8 @@ class Interpreter:
         run_store: RunStore | None = None,
         path_rewriter: Callable[[str, TraceContext], str] | None = None,
         supported_languages: list[str] | None = None,
+        wikidata: WikidataClient | None = None,
+        default_language: str = "de",
     ) -> None:
         self._router = router
         self._trace_collector = trace_collector
@@ -181,6 +235,8 @@ class Interpreter:
         self._run_store = run_store
         self._path_rewriter = path_rewriter
         self._supported_languages = supported_languages
+        self._wikidata = wikidata
+        self._default_language = default_language
 
     @property
     def trace_store(self) -> TraceStore | None:
@@ -219,8 +275,12 @@ class Interpreter:
         )
         self._run_store.insert(run)
 
-    def execute(self, raw_input: dict[str, Any]) -> CommandResponse:
-        """Execute command from raw JSON dict. Returns CommandResponse."""
+    def execute(self, raw_input: dict[str, Any], *, persist: bool = True) -> CommandResponse:
+        """Execute command from raw JSON dict. Returns CommandResponse.
+
+        If persist is False, traces and CLI runs are not written to the stores
+        (used for lightweight operations such as path completion).
+        """
         start = time.perf_counter()
         run_id_raw = raw_input.get("run_id")
         if run_id_raw and isinstance(run_id_raw, str) and run_id_raw.strip():
@@ -252,7 +312,7 @@ class Interpreter:
             with ctx.phase("parse"):
                 pass
             trace = self._trace_collector.finish_trace(ctx, 1)
-            if self._trace_store:
+            if self._trace_store and persist:
                 self._trace_store.save(trace)
             _record_routing_error(
                 self._error_collector,
@@ -262,7 +322,7 @@ class Interpreter:
                 parsed,
                 "invalid_command",
             )
-            if not skip_persist:
+            if persist and not skip_persist:
                 self._persist_cli_run(
                     run_id, trace.trace_id, start, 1, f"Error: {parsed}", raw_cmd, raw_path
                 )
@@ -296,7 +356,7 @@ class Interpreter:
                 with ctx.phase("parse"):
                     pass
                 trace = self._trace_collector.finish_trace(ctx, 1)
-                if self._trace_store:
+                if self._trace_store and persist:
                     self._trace_store.save(trace)
                 msg = (
                     f"Unsupported language: {lg}. "
@@ -310,7 +370,7 @@ class Interpreter:
                     msg,
                     "invalid_flag",
                 )
-                if not skip_persist:
+                if persist and not skip_persist:
                     self._persist_cli_run(
                         run_id, trace_id, start, 1, msg, cmd.command, cmd.path
                     )
@@ -334,7 +394,7 @@ class Interpreter:
                 with ctx.phase("route"):
                     pass
                 trace = self._trace_collector.finish_trace(ctx, 1)
-                if self._trace_store:
+                if self._trace_store and persist:
                     self._trace_store.save(trace)
                 msg = (
                     f"Unknown command: {cmd.command}. "
@@ -348,7 +408,7 @@ class Interpreter:
                     msg,
                     "invalid_command",
                 )
-                if not skip_persist:
+                if persist and not skip_persist:
                     self._persist_cli_run(
                         run_id, trace_id, start, 1, msg, cmd.command, cmd.path
                     )
@@ -368,7 +428,7 @@ class Interpreter:
                 with ctx.phase("route"):
                     pass
                 trace = self._trace_collector.finish_trace(ctx, 1)
-                if self._trace_store:
+                if self._trace_store and persist:
                     self._trace_store.save(trace)
                 msg = "Invalid path: must start with /wiki/"
                 _record_routing_error(
@@ -379,7 +439,7 @@ class Interpreter:
                     msg,
                     "invalid_path",
                 )
-                if not skip_persist:
+                if persist and not skip_persist:
                     self._persist_cli_run(
                         run_id, trace_id, start, 1, msg, cmd.command, cmd.path
                     )
@@ -399,7 +459,7 @@ class Interpreter:
                 with ctx.phase("route"):
                     pass
                 trace = self._trace_collector.finish_trace(ctx, 1)
-                if self._trace_store:
+                if self._trace_store and persist:
                     self._trace_store.save(trace)
                 _record_routing_error(
                     self._error_collector,
@@ -409,7 +469,7 @@ class Interpreter:
                     flag_err,
                     "invalid_flag",
                 )
-                if not skip_persist:
+                if persist and not skip_persist:
                     self._persist_cli_run(
                         run_id, trace_id, start, 1, flag_err, cmd.command, cmd.path
                     )
@@ -431,7 +491,7 @@ class Interpreter:
                     with ctx.phase("route"):
                         pass
                     trace = self._trace_collector.finish_trace(ctx, 1)
-                    if self._trace_store:
+                    if self._trace_store and persist:
                         self._trace_store.save(trace)
                     msg = "Use `search` for cross-entity queries"
                     _record_routing_error(
@@ -442,7 +502,7 @@ class Interpreter:
                         msg,
                         "invalid_path",
                     )
-                    if not skip_persist:
+                    if persist and not skip_persist:
                         self._persist_cli_run(
                             run_id, trace_id, start, 1, msg, cmd.command, cmd.path
                         )
@@ -468,7 +528,7 @@ class Interpreter:
 
             if route is None:
                 trace = self._trace_collector.finish_trace(ctx, 2)
-                if self._trace_store:
+                if self._trace_store and persist:
                     self._trace_store.save(trace)
                 msg = f"Not found: {path}"
                 _record_routing_error(
@@ -479,7 +539,7 @@ class Interpreter:
                     msg,
                     "not_found",
                 )
-                if not skip_persist:
+                if persist and not skip_persist:
                     self._persist_cli_run(
                         run_id, trace_id, start, 2, msg, cmd.command, cmd.path
                     )
@@ -504,9 +564,9 @@ class Interpreter:
                     self._handlers,
                 )
             trace = self._trace_collector.finish_trace(ctx, exit_code)
-            if self._trace_store:
+            if self._trace_store and persist:
                 self._trace_store.save(trace)
-            if not skip_persist:
+            if persist and not skip_persist:
                 self._persist_cli_run(
                     run_id, trace_id, start, exit_code, output, cmd.command, cmd.path
                 )
@@ -524,7 +584,7 @@ class Interpreter:
 
         except Exception as e:
             trace = self._trace_collector.finish_trace(ctx, 1)
-            if self._trace_store:
+            if self._trace_store and persist:
                 self._trace_store.save(trace)
             err_msg = str(e)
             if self._error_collector:
@@ -538,7 +598,7 @@ class Interpreter:
                     command=cmd.command,
                     path=cmd.path,
                 )
-            if not skip_persist:
+            if persist and not skip_persist:
                 self._persist_cli_run(
                     run_id, trace_id, start, 1, err_msg, cmd.command, cmd.path
                 )
@@ -551,6 +611,125 @@ class Interpreter:
                 timing_ms=timing_ms,
                 error_type="invalid_command",
             )
+
+    def complete(self, raw_input: dict[str, Any]) -> CompletionResult:
+        """Suggest virtual path completions for a ``/wiki/...`` prefix."""
+        path_input = str(raw_input.get("path", "")).strip()
+        try:
+            limit = int(raw_input.get("limit", 50))
+        except (TypeError, ValueError):
+            limit = 50
+        limit = max(1, min(limit, MAX_COMPLETION_CANDIDATES))
+
+        if not path_input.startswith("/wiki"):
+            return CompletionResult(
+                path=path_input,
+                candidates=[],
+                error="Invalid path: must start with /wiki",
+            )
+
+        lang_raw = raw_input.get("lang")
+        if isinstance(lang_raw, str) and lang_raw.strip():
+            lg = lang_raw.strip().lower()
+            if self._supported_languages and lg not in self._supported_languages:
+                return CompletionResult(
+                    path=path_input,
+                    candidates=[],
+                    error=(
+                        f"Unsupported language: {lg}. "
+                        f"Allowed: {', '.join(self._supported_languages)}"
+                    ),
+                )
+
+        ends = path_input.endswith("/")
+        work = normalize_path(path_input)
+        trace_for_rewrite: TraceContext | None = None
+        if self._path_rewriter is not None:
+            trace_for_rewrite = self._trace_collector.start_trace(
+                "complete",
+                path_input,
+                [],
+                str(raw_input.get("request_id") or uuid.uuid4()),
+            )
+            if isinstance(lang_raw, str) and lang_raw.strip():
+                trace_for_rewrite.set_request_language(lang_raw.strip().lower())
+            try:
+                work = self._path_rewriter(work, trace_for_rewrite)
+            finally:
+                self._trace_collector.finish_trace(trace_for_rewrite, 0)
+
+        kind, list_base, partial = _analyze_completion_work_path(work, ends)
+
+        if kind == "invalid":
+            return CompletionResult(path=path_input, candidates=[], error="Invalid path")
+
+        def _wiki_root_candidates(pfx: str) -> list[str]:
+            names = _completion_filter(list(WIKI_ROOT_COMPLETION_ENTRIES), pfx)
+            return [f"/wiki/{n}" for n in names]
+
+        if kind == "wiki_root":
+            c = _wiki_root_candidates(partial)
+            return CompletionResult(path=path_input, candidates=c[:limit])
+
+        if kind == "entity_search":
+            if self._wikidata is None:
+                return CompletionResult(
+                    path=path_input,
+                    candidates=[],
+                    error="Entity completion unavailable",
+                )
+            if not partial.strip():
+                return CompletionResult(path=path_input, candidates=[])
+            req_id = str(raw_input.get("request_id") or uuid.uuid4())
+            ctx = self._trace_collector.start_trace("complete", path_input, [], req_id)
+            if isinstance(lang_raw, str) and lang_raw.strip():
+                ctx.set_request_language(lang_raw.strip().lower())
+            try:
+                lang = ctx.effective_language(self._default_language)
+                with ctx.phase("completion_search"):
+                    results = self._wikidata.search_entities(
+                        partial.strip(), lang=lang, limit=limit, ctx=ctx
+                    )
+            finally:
+                self._trace_collector.finish_trace(ctx, 0)
+
+            candidates: list[str] = []
+            for r in results:
+                seg = (r.wikipedia_title or r.label or "").strip().replace(" ", "_")
+                if not seg:
+                    continue
+                candidates.append(_join_wiki_segment(ENTITIES_ROOT_NORMALIZED, seg) + "/")
+            return CompletionResult(path=path_input, candidates=candidates[:limit])
+
+        # list_dir
+        if list_base == "/wiki":
+            c = _wiki_root_candidates(partial)
+            return CompletionResult(path=path_input, candidates=c[:limit])
+
+        if list_base == ENTITIES_ROOT_NORMALIZED and not partial:
+            return CompletionResult(path=path_input, candidates=[])
+
+        ls_path = list_base.rstrip("/") + "/"
+        raw_ls: dict[str, Any] = {
+            "command": "ls",
+            "path": ls_path,
+            "flags": [],
+            "request_id": str(uuid.uuid4()),
+        }
+        if isinstance(lang_raw, str) and lang_raw.strip():
+            raw_ls["lang"] = lang_raw.strip().lower()
+
+        ls_resp = self.execute(raw_ls, persist=False)
+        if ls_resp.exit_code != 0:
+            return CompletionResult(
+                path=path_input,
+                candidates=[],
+                error=(ls_resp.output or "completion failed").strip(),
+            )
+
+        names = _completion_filter(_parse_ls_entry_names(ls_resp.output), partial)
+        candidates = [_join_wiki_segment(list_base, n) for n in names]
+        return CompletionResult(path=path_input, candidates=candidates[:limit])
 
     def execute_command(self, command: Command) -> CommandResponse:
         """Execute a parsed Command object."""
