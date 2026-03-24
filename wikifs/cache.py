@@ -260,10 +260,11 @@ class Cache:
         return None
 
     def set(self, key: str, value: bytes, ttl: int | None = None) -> None:
-        """Write to both L1 and L2."""
-        ttl_sec = ttl if ttl is not None else self._config.l2_ttl_seconds
-        self._l1.set(key, value, ttl_sec)
-        self._l2.set(key, value, ttl_sec)
+        """Write to both L1 and L2 with their respective TTLs."""
+        l1_ttl = ttl if ttl is not None else self._config.l1_ttl_seconds
+        l2_ttl = ttl if ttl is not None else self._config.l2_ttl_seconds
+        self._l1.set(key, value, l1_ttl)
+        self._l2.set(key, value, l2_ttl)
 
     def delete(self, key: str) -> bool:
         """Delete from both levels. Returns True if key was present in either."""

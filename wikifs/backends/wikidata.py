@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import time
 from contextlib import nullcontext
 from typing import Any, cast
@@ -11,6 +12,7 @@ from urllib.parse import quote
 
 import requests
 
+from wikifs.backends.utils import record_api_error as _record_api_error
 from wikifs.backends.wikidata_models import (
     Claim,
     ClaimValue,
@@ -71,30 +73,32 @@ def _property_labels_cache_key(prop_ids: str, lang: str) -> str:
     return f"wikidata:property_labels:{prop_ids}:{lang}"
 
 
-def _record_api_error(
-    error_collector: ErrorCollector | None,
-    ctx: TraceContext | None,
-    category: str,
-    severity: str,
-    message: str,
-    details: dict[str, Any],
-) -> None:
-    """Record error if collector and ctx available."""
-    if error_collector is None:
-        return
-    trace_id = ctx._trace_id if ctx else None
-    run_id = ctx._run_id if ctx else None
-    command = ctx._command if ctx else None
-    path = ctx._path if ctx else None
-    error_collector.record(
-        category=category,
-        severity=severity,
-        message=message,
-        details=details,
-        trace_id=trace_id,
-        run_id=run_id,
-        command=command,
-        path=path,
+_WIKIDATA_ID_RE = re.compile(r"^Q\d+$")
+_LETTER_RE = re.compile(r"^[A-Z]$")
+
+
+def _validate_wikidata_id(qid: str) -> str:
+    """Validate and return a Wikidata entity ID (e.g. Q64)."""
+    if not _WIKIDATA_ID_RE.match(qid):
+        raise WikidataError(f"Invalid Wikidata ID: {qid!r}")
+    return qid
+
+
+def _validate_letter(letter: str) -> str:
+    """Validate a single uppercase letter for SPARQL FILTER."""
+    if not _LETTER_RE.match(letter):
+        raise WikidataError(f"Invalid letter filter: {letter!r}")
+    return letter
+
+
+def _resolve_sitelink_title(sitelinks: dict[str, str], lang: str = "de") -> str:
+    """Pick the best Wikipedia title from sitelinks, preferring the requested language."""
+    preferred = f"{lang}wiki"
+    fallback = "enwiki" if lang != "en" else "dewiki"
+    return (
+        sitelinks.get(preferred)
+        or sitelinks.get(fallback, "")
+        or (next(iter(sitelinks.values()), "") if sitelinks else "")
     )
 
 
@@ -490,11 +494,7 @@ class WikidataClient:
         entity_data = self.get_entity(entity_id, lang=lang, ctx=ctx)
         if entity_data is None:
             return None
-        wiki_title = entity_data.sitelinks.get("dewiki") or entity_data.sitelinks.get(
-            "enwiki", ""
-        )
-        if not wiki_title and entity_data.sitelinks:
-            wiki_title = next(iter(entity_data.sitelinks.values()), "")
+        wiki_title = _resolve_sitelink_title(entity_data.sitelinks, lang)
         return ResolvedEntity(
             entity_id=entity_data.entity_id,
             label=entity_data.label,
@@ -578,12 +578,7 @@ class WikidataClient:
             if target_id.startswith("Q"):
                 target_entity = self.get_entity(target_id, lang=lang, ctx=ctx)
                 if target_entity:
-                    wiki_title = (
-                        target_entity.sitelinks.get("dewiki")
-                        or target_entity.sitelinks.get("enwiki", "")
-                    )
-                    if not wiki_title and target_entity.sitelinks:
-                        wiki_title = next(iter(target_entity.sitelinks.values()), "")
+                    wiki_title = _resolve_sitelink_title(target_entity.sitelinks, lang)
                     targets.append(
                         RelationTarget(
                             entity_id=target_id,
@@ -719,6 +714,7 @@ class WikidataClient:
         """Get class members via SPARQL (P31 -> class_id)."""
         if not class_id.startswith("Q"):
             class_id = f"Q{class_id}"
+        class_id = _validate_wikidata_id(class_id)
         query = (
             f"SELECT ?x WHERE {{ ?x wdt:P31 wd:{class_id} }} "
             f"LIMIT {limit + 1} OFFSET {offset}"
@@ -737,12 +733,7 @@ class WikidataClient:
             if entity_id:
                 entity = self.get_entity(entity_id, ctx=ctx)
                 if entity:
-                    wiki_title = (
-                        entity.sitelinks.get("dewiki")
-                        or entity.sitelinks.get("enwiki", "")
-                    )
-                    if not wiki_title and entity.sitelinks:
-                        wiki_title = next(iter(entity.sitelinks.values()), "")
+                    wiki_title = _resolve_sitelink_title(entity.sitelinks)
                     members.append(
                         SearchResult(
                             entity_id=entity_id,
@@ -778,6 +769,9 @@ class WikidataClient:
         """Get class members whose label starts with A-end_letter (for segment listing)."""
         if not class_id.startswith("Q"):
             class_id = f"Q{class_id}"
+        class_id = _validate_wikidata_id(class_id)
+        start_letter = _validate_letter(start_letter.upper())
+        end_letter = _validate_letter(end_letter.upper())
         query = (
             "SELECT ?x ?label WHERE {"
             f" ?x wdt:P31 wd:{class_id} ."
@@ -798,12 +792,7 @@ class WikidataClient:
             if entity_id:
                 entity = self.get_entity(entity_id, ctx=ctx)
                 if entity:
-                    wiki_title = (
-                        entity.sitelinks.get("dewiki")
-                        or entity.sitelinks.get("enwiki", "")
-                    )
-                    if not wiki_title and entity.sitelinks:
-                        wiki_title = next(iter(entity.sitelinks.values()), "")
+                    wiki_title = _resolve_sitelink_title(entity.sitelinks)
                     members.append(
                         SearchResult(
                             entity_id=entity_id,

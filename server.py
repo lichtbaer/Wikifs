@@ -43,37 +43,6 @@ def _get_ctx() -> Any:
     return _server_ctx
 
 
-def _trace_to_dict(trace: Any) -> dict[str, Any]:
-    """Serialize Trace to JSON-serializable dict."""
-    return {
-        "trace_id": trace.trace_id,
-        "request_id": trace.request_id,
-        "timestamp": trace.timestamp,
-        "command": trace.command,
-        "path": trace.path,
-        "flags": trace.flags,
-        "phases": [
-            {
-                "phase": p.phase,
-                "duration_ms": p.duration_ms,
-                "result": p.result,
-                "cache_hit": p.cache_hit,
-                "api_url": p.api_url,
-                "response_bytes": p.response_bytes,
-                "error": p.error,
-                "metadata": p.metadata,
-            }
-            for p in trace.phases
-        ],
-        "total_duration_ms": trace.total_duration_ms,
-        "cache_hits": trace.cache_hits,
-        "cache_misses": trace.cache_misses,
-        "api_calls": trace.api_calls,
-        "response_bytes": trace.response_bytes,
-        "exit_code": trace.exit_code,
-    }
-
-
 def _trace_stats_to_dict(stats: TraceStats) -> dict[str, Any]:
     """Serialize TraceStats to JSON-serializable dict."""
     return {
@@ -106,7 +75,7 @@ def _command_response_to_dict(
     if include_trace:
         trace = ctx.trace_store.get_by_trace_id(response.trace_id)
         if trace is not None:
-            result["trace"] = _trace_to_dict(trace)
+            result["trace"] = trace.to_dict()
     return result
 
 
@@ -220,7 +189,7 @@ def traces(
         path_pattern=path,
         limit=limit,
     )
-    return [_trace_to_dict(t) for t in result]
+    return [t.to_dict() for t in result]
 
 
 @app.delete("/cache")

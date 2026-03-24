@@ -275,6 +275,44 @@ class Interpreter:
         )
         self._run_store.insert(run)
 
+    def _make_error_response(
+        self,
+        ctx: Any,
+        trace_id: str,
+        request_id: str,
+        run_id: str,
+        start: float,
+        exit_code: int,
+        message: str,
+        error_type: str,
+        command: str,
+        path: str,
+        persist: bool,
+        skip_persist: bool,
+        suggestions: list[str] | None = None,
+    ) -> CommandResponse:
+        """Finalize trace, record error, persist run, and return error CommandResponse."""
+        trace = self._trace_collector.finish_trace(ctx, exit_code)
+        if self._trace_store and persist:
+            self._trace_store.save(trace)
+        _record_routing_error(
+            self._error_collector, trace_id, command, path, message, error_type,
+        )
+        if persist and not skip_persist:
+            self._persist_cli_run(
+                run_id, trace_id, start, exit_code, message, command, path,
+            )
+        timing_ms = (time.perf_counter() - start) * 1000
+        return CommandResponse(
+            output=message,
+            exit_code=exit_code,
+            request_id=request_id,
+            trace_id=trace_id,
+            timing_ms=timing_ms,
+            error_type=error_type,
+            suggestions=suggestions,
+        )
+
     def execute(self, raw_input: dict[str, Any], *, persist: bool = True) -> CommandResponse:
         """Execute command from raw JSON dict. Returns CommandResponse.
 
@@ -303,37 +341,15 @@ class Interpreter:
             flags_raw = raw_input.get("flags")
             flags = flags_raw if isinstance(flags_raw, list) else []
             ctx = self._trace_collector.start_trace(
-                command=raw_cmd,
-                path=raw_path,
-                flags=flags,
-                request_id=request_id,
-                run_id=run_id,
+                command=raw_cmd, path=raw_path, flags=flags,
+                request_id=request_id, run_id=run_id,
             )
             with ctx.phase("parse"):
                 pass
-            trace = self._trace_collector.finish_trace(ctx, 1)
-            if self._trace_store and persist:
-                self._trace_store.save(trace)
-            _record_routing_error(
-                self._error_collector,
-                trace.trace_id,
-                raw_cmd,
-                raw_path,
-                parsed,
-                "invalid_command",
-            )
-            if persist and not skip_persist:
-                self._persist_cli_run(
-                    run_id, trace.trace_id, start, 1, f"Error: {parsed}", raw_cmd, raw_path
-                )
-            timing_ms = (time.perf_counter() - start) * 1000
-            return CommandResponse(
-                output=f"Error: {parsed}",
-                exit_code=1,
-                request_id=request_id,
-                trace_id=trace.trace_id,
-                timing_ms=timing_ms,
-                error_type="invalid_command",
+            return self._make_error_response(
+                ctx, ctx._trace_id, request_id, run_id, start, 1,
+                f"Error: {parsed}", "invalid_command", raw_cmd, raw_path,
+                persist, skip_persist,
             )
 
         cmd = parsed
@@ -341,11 +357,8 @@ class Interpreter:
 
         # Start trace
         ctx = self._trace_collector.start_trace(
-            command=cmd.command,
-            path=cmd.path,
-            flags=cmd.flags,
-            request_id=request_id,
-            run_id=run_id,
+            command=cmd.command, path=cmd.path, flags=cmd.flags,
+            request_id=request_id, run_id=run_id,
         )
         trace_id = ctx._trace_id
 
@@ -355,33 +368,14 @@ class Interpreter:
             if self._supported_languages and lg not in self._supported_languages:
                 with ctx.phase("parse"):
                     pass
-                trace = self._trace_collector.finish_trace(ctx, 1)
-                if self._trace_store and persist:
-                    self._trace_store.save(trace)
                 msg = (
                     f"Unsupported language: {lg}. "
                     f"Allowed: {', '.join(self._supported_languages)}"
                 )
-                _record_routing_error(
-                    self._error_collector,
-                    trace_id,
-                    cmd.command,
-                    cmd.path,
-                    msg,
-                    "invalid_flag",
-                )
-                if persist and not skip_persist:
-                    self._persist_cli_run(
-                        run_id, trace_id, start, 1, msg, cmd.command, cmd.path
-                    )
-                timing_ms = (time.perf_counter() - start) * 1000
-                return CommandResponse(
-                    output=msg,
-                    exit_code=1,
-                    request_id=request_id,
-                    trace_id=trace_id,
-                    timing_ms=timing_ms,
-                    error_type="invalid_flag",
+                return self._make_error_response(
+                    ctx, trace_id, request_id, run_id, start, 1,
+                    msg, "invalid_flag", cmd.command, cmd.path,
+                    persist, skip_persist,
                 )
             ctx.set_request_language(lg)
 
@@ -393,33 +387,10 @@ class Interpreter:
             if cmd.command not in ALLOWED_COMMANDS:
                 with ctx.phase("route"):
                     pass
-                trace = self._trace_collector.finish_trace(ctx, 1)
-                if self._trace_store and persist:
-                    self._trace_store.save(trace)
-                msg = (
-                    f"Unknown command: {cmd.command}. "
-                    "Allowed: ls, cat, head, tail, grep, search"
-                )
-                _record_routing_error(
-                    self._error_collector,
-                    trace_id,
-                    cmd.command,
-                    cmd.path,
-                    msg,
-                    "invalid_command",
-                )
-                if persist and not skip_persist:
-                    self._persist_cli_run(
-                        run_id, trace_id, start, 1, msg, cmd.command, cmd.path
-                    )
-                timing_ms = (time.perf_counter() - start) * 1000
-                return CommandResponse(
-                    output=msg,
-                    exit_code=1,
-                    request_id=request_id,
-                    trace_id=trace_id,
-                    timing_ms=timing_ms,
-                    error_type="invalid_command",
+                return self._make_error_response(
+                    ctx, trace_id, request_id, run_id, start, 1,
+                    f"Unknown command: {cmd.command}. Allowed: ls, cat, head, tail, grep, search",
+                    "invalid_command", cmd.command, cmd.path, persist, skip_persist,
                     suggestions=["ls", "cat", "head", "tail", "grep", "search"],
                 )
 
@@ -427,30 +398,10 @@ class Interpreter:
             if not cmd.path.startswith("/wiki/"):
                 with ctx.phase("route"):
                     pass
-                trace = self._trace_collector.finish_trace(ctx, 1)
-                if self._trace_store and persist:
-                    self._trace_store.save(trace)
-                msg = "Invalid path: must start with /wiki/"
-                _record_routing_error(
-                    self._error_collector,
-                    trace_id,
-                    cmd.command,
-                    cmd.path,
-                    msg,
-                    "invalid_path",
-                )
-                if persist and not skip_persist:
-                    self._persist_cli_run(
-                        run_id, trace_id, start, 1, msg, cmd.command, cmd.path
-                    )
-                timing_ms = (time.perf_counter() - start) * 1000
-                return CommandResponse(
-                    output=msg,
-                    exit_code=1,
-                    request_id=request_id,
-                    trace_id=trace_id,
-                    timing_ms=timing_ms,
-                    error_type="invalid_path",
+                return self._make_error_response(
+                    ctx, trace_id, request_id, run_id, start, 1,
+                    "Invalid path: must start with /wiki/",
+                    "invalid_path", cmd.command, cmd.path, persist, skip_persist,
                 )
 
             # Validate flags
@@ -458,63 +409,23 @@ class Interpreter:
             if flag_err:
                 with ctx.phase("route"):
                     pass
-                trace = self._trace_collector.finish_trace(ctx, 1)
-                if self._trace_store and persist:
-                    self._trace_store.save(trace)
-                _record_routing_error(
-                    self._error_collector,
-                    trace_id,
-                    cmd.command,
-                    cmd.path,
-                    flag_err,
-                    "invalid_flag",
-                )
-                if persist and not skip_persist:
-                    self._persist_cli_run(
-                        run_id, trace_id, start, 1, flag_err, cmd.command, cmd.path
-                    )
-                timing_ms = (time.perf_counter() - start) * 1000
-                return CommandResponse(
-                    output=flag_err,
-                    exit_code=1,
-                    request_id=request_id,
-                    trace_id=trace_id,
-                    timing_ms=timing_ms,
-                    error_type="invalid_flag",
+                return self._make_error_response(
+                    ctx, trace_id, request_id, run_id, start, 1,
+                    flag_err, "invalid_flag", cmd.command, cmd.path,
+                    persist, skip_persist,
                 )
 
             # grep on /wiki/entities/ (cross-entity, no specific entity) is invalid
             if cmd.command == "grep":
                 normalized_for_check = normalize_path(cmd.path)
-                # Reject /wiki/entities or /wiki/entities/ — no entity name
                 if normalized_for_check == ENTITIES_ROOT_NORMALIZED:
                     with ctx.phase("route"):
                         pass
-                    trace = self._trace_collector.finish_trace(ctx, 1)
-                    if self._trace_store and persist:
-                        self._trace_store.save(trace)
-                    msg = "Use `search` for cross-entity queries"
-                    _record_routing_error(
-                        self._error_collector,
-                        trace_id,
-                        cmd.command,
-                        cmd.path,
-                        msg,
-                        "invalid_path",
-                    )
-                    if persist and not skip_persist:
-                        self._persist_cli_run(
-                            run_id, trace_id, start, 1, msg, cmd.command, cmd.path
-                        )
-                    timing_ms = (time.perf_counter() - start) * 1000
-                    return CommandResponse(
-                        output=msg,
-                        exit_code=1,
-                        request_id=request_id,
-                        trace_id=trace_id,
-                        timing_ms=timing_ms,
-                        error_type="invalid_path",
-                        suggestions=["search"],
+                    return self._make_error_response(
+                        ctx, trace_id, request_id, run_id, start, 1,
+                        "Use `search` for cross-entity queries",
+                        "invalid_path", cmd.command, cmd.path,
+                        persist, skip_persist, suggestions=["search"],
                     )
 
             # Normalize path; optional Q-ID → Wikipedia title rewrite
@@ -527,30 +438,10 @@ class Interpreter:
                 route = self._router.match(path)
 
             if route is None:
-                trace = self._trace_collector.finish_trace(ctx, 2)
-                if self._trace_store and persist:
-                    self._trace_store.save(trace)
-                msg = f"Not found: {path}"
-                _record_routing_error(
-                    self._error_collector,
-                    trace_id,
-                    cmd.command,
-                    cmd.path,
-                    msg,
-                    "not_found",
-                )
-                if persist and not skip_persist:
-                    self._persist_cli_run(
-                        run_id, trace_id, start, 2, msg, cmd.command, cmd.path
-                    )
-                timing_ms = (time.perf_counter() - start) * 1000
-                return CommandResponse(
-                    output=msg,
-                    exit_code=2,
-                    request_id=request_id,
-                    trace_id=trace_id,
-                    timing_ms=timing_ms,
-                    error_type="not_found",
+                return self._make_error_response(
+                    ctx, trace_id, request_id, run_id, start, 2,
+                    f"Not found: {path}", "not_found",
+                    cmd.command, cmd.path, persist, skip_persist,
                 )
 
             # Dispatch to handler

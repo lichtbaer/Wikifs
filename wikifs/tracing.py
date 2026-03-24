@@ -46,6 +46,36 @@ class Trace:
     response_bytes: int
     exit_code: int
 
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to JSON-serializable dict."""
+        return {
+            "trace_id": self.trace_id,
+            "request_id": self.request_id,
+            "timestamp": self.timestamp,
+            "command": self.command,
+            "path": self.path,
+            "flags": self.flags,
+            "phases": [
+                {
+                    "phase": p.phase,
+                    "duration_ms": p.duration_ms,
+                    "result": p.result,
+                    "cache_hit": p.cache_hit,
+                    "api_url": p.api_url,
+                    "response_bytes": p.response_bytes,
+                    "error": p.error,
+                    "metadata": p.metadata,
+                }
+                for p in self.phases
+            ],
+            "total_duration_ms": self.total_duration_ms,
+            "cache_hits": self.cache_hits,
+            "cache_misses": self.cache_misses,
+            "api_calls": self.api_calls,
+            "response_bytes": self.response_bytes,
+            "exit_code": self.exit_code,
+        }
+
 
 @dataclass
 class TraceStats:

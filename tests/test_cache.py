@@ -112,6 +112,25 @@ def test_cache_ttl_expired_returns_none() -> None:
         assert cache.get("k") is None
 
 
+def test_cache_set_uses_separate_ttls_per_level() -> None:
+    """Cache.set() uses l1_ttl for L1 and l2_ttl for L2 when no explicit TTL given."""
+    with tempfile.TemporaryDirectory() as tmp:
+        cfg = CacheConfig(
+            l1_max_size=4,
+            l1_ttl_seconds=0,  # L1 expires immediately
+            l2_ttl_seconds=86400,  # L2 lasts 24h
+            l2_db_path=str(Path(tmp) / "cache.db"),
+        )
+        cache = Cache(cfg)
+        cache.set("k", b"v")
+        # L1 should have expired (ttl=0), L2 should still hold the value
+        val = cache.get("k")
+        assert val == b"v"
+        s = cache.stats()
+        assert s.l1_misses == 1  # L1 expired
+        assert s.l2_hits == 1  # L2 still valid
+
+
 def test_cache_l1_eviction_lru() -> None:
     """L1 evicts correctly when exceeding l1_max_size (LRU semantics)."""
     with tempfile.TemporaryDirectory() as tmp:
