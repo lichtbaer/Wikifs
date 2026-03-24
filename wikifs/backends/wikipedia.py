@@ -4,15 +4,16 @@ from __future__ import annotations
 
 import json
 import re
+import time
 import unicodedata
 from contextlib import nullcontext
 from html.parser import HTMLParser
-from typing import Any
 from urllib.parse import quote, urlencode
 
 import requests
 from markdownify import markdownify as md
 
+from wikifs.backends.utils import record_api_error as _record_api_error
 from wikifs.backends.wikipedia_models import (
     ArticleContent,
     ArticleSummary,
@@ -75,33 +76,6 @@ def _build_url(base: str, lang: str, path: str, title: str) -> str:
     return f"{url_base}/api/rest_v1/page/{path}/{encoded_title}"
 
 
-def _record_api_error(
-    error_collector: ErrorCollector | None,
-    ctx: TraceContext | None,
-    category: str,
-    severity: str,
-    message: str,
-    details: dict[str, Any],
-) -> None:
-    """Record error if collector and ctx available."""
-    if error_collector is None:
-        return
-    trace_id = ctx._trace_id if ctx else None
-    run_id = ctx._run_id if ctx else None
-    command = ctx._command if ctx else None
-    path = ctx._path if ctx else None
-    error_collector.record(
-        category=category,
-        severity=severity,
-        message=message,
-        details=details,
-        trace_id=trace_id,
-        run_id=run_id,
-        command=command,
-        path=path,
-    )
-
-
 def _http_get(
     url: str,
     config: ApiConfig,
@@ -109,56 +83,71 @@ def _http_get(
     allow_redirect: bool = True,
     error_collector: ErrorCollector | None = None,
 ) -> tuple[bytes, str]:
-    """Perform HTTP GET. Returns (body, final_url). Follows redirects."""
+    """Perform HTTP GET with retry logic for 429 and 5xx. Returns (body, final_url)."""
     headers = {"User-Agent": config.user_agent}
     timeout = config.request_timeout_seconds
 
-    try:
-        resp = requests.get(
-            url,
-            headers=headers,
-            timeout=timeout,
-            allow_redirects=allow_redirect,
-        )
-    except requests.Timeout as e:
-        _record_api_error(
-            error_collector,
-            ctx,
-            "timeout",
-            "error",
-            f"Request timeout: {url}",
-            {"url": url, "error": str(e)},
-        )
-        raise WikipediaTimeoutError(f"Request timeout: {url}") from e
+    for attempt in range(4):  # 1 initial + 3 retries for 429
+        try:
+            resp = requests.get(
+                url,
+                headers=headers,
+                timeout=timeout,
+                allow_redirects=allow_redirect,
+            )
+        except requests.Timeout as e:
+            _record_api_error(
+                error_collector, ctx, "timeout", "error",
+                f"Request timeout: {url}", {"url": url, "error": str(e)},
+            )
+            raise WikipediaTimeoutError(f"Request timeout: {url}") from e
 
-    if resp.status_code == 404:
-        _record_api_error(
-            error_collector,
-            ctx,
-            "api",
-            "warning",
-            f"Article not found in this language: {url}",
-            {"url": url, "status_code": 404},
-        )
-        raise WikipediaNotFoundError(
-            f"Article not found in this language: {url}"
-        ) from None
+        if resp.status_code == 429:
+            retry_after = resp.headers.get("Retry-After", "60")
+            try:
+                wait_sec = int(retry_after)
+            except ValueError:
+                wait_sec = 60
+            if attempt < 3:
+                time.sleep(wait_sec)
+                continue
+            _record_api_error(
+                error_collector, ctx, "api", "error",
+                f"Rate limit exceeded after 3 retries: {url}",
+                {"url": url, "status_code": 429},
+            )
+            raise WikipediaError(
+                f"Rate limit exceeded after 3 retries: {url}"
+            ) from None
 
-    if resp.status_code != 200:
-        _record_api_error(
-            error_collector,
-            ctx,
-            "api",
-            "error",
-            f"HTTP {resp.status_code}: {url}",
-            {"url": url, "status_code": resp.status_code},
-        )
-        raise WikipediaError(f"HTTP {resp.status_code}: {url}") from None
+        if 500 <= resp.status_code < 600 and attempt == 0:
+            time.sleep(1)
+            continue
 
-    data: bytes = resp.content
-    if ctx is not None:
-        ctx.record_api_call(url, len(data))
-    return data, resp.url
+        if resp.status_code == 404:
+            _record_api_error(
+                error_collector, ctx, "api", "warning",
+                f"Article not found in this language: {url}",
+                {"url": url, "status_code": 404},
+            )
+            raise WikipediaNotFoundError(
+                f"Article not found in this language: {url}"
+            ) from None
+
+        if resp.status_code != 200:
+            _record_api_error(
+                error_collector, ctx, "api", "error",
+                f"HTTP {resp.status_code}: {url}",
+                {"url": url, "status_code": resp.status_code},
+            )
+            raise WikipediaError(f"HTTP {resp.status_code}: {url}") from None
+
+        data: bytes = resp.content
+        if ctx is not None:
+            ctx.record_api_call(url, len(data))
+        return data, resp.url
+
+    raise WikipediaError(f"Request failed: {url}")
 
 
 def _html_to_markdown(html: str) -> str:
@@ -413,7 +402,8 @@ class WikipediaClient:
             data = json.loads(cached)
             return list(data)
 
-        params = {
+        all_titles: list[str] = []
+        params: dict[str, str] = {
             "action": "query",
             "format": "json",
             "redirects": "1",
@@ -422,25 +412,29 @@ class WikipediaClient:
             "cllimit": "500",
             "clshow": "!hidden",
         }
-        url = _mediawiki_api_url(self._base, lang, params)
-        cm = ctx.phase("mediawiki_categories") if ctx else nullcontext()
-        with cm:
-            data_bytes, _ = _http_get(
-                url, self._config, ctx, error_collector=self._error_collector
-            )
-        payload = json.loads(data_bytes)
-        if "error" in payload:
-            raise WikipediaError(
-                f"MediaWiki API error: {payload.get('error', {})}"
-            )
-        titles: list[str] = []
-        for _pid, pg in payload.get("query", {}).get("pages", {}).items():
-            if not isinstance(pg, dict):
-                continue
-            for c in pg.get("categories", []) or []:
-                if isinstance(c, dict) and "title" in c:
-                    titles.append(str(c["title"]))
-        titles = sorted(set(titles))
+        while True:
+            url = _mediawiki_api_url(self._base, lang, params)
+            cm = ctx.phase("mediawiki_categories") if ctx else nullcontext()
+            with cm:
+                data_bytes, _ = _http_get(
+                    url, self._config, ctx, error_collector=self._error_collector
+                )
+            payload = json.loads(data_bytes)
+            if "error" in payload:
+                raise WikipediaError(
+                    f"MediaWiki API error: {payload.get('error', {})}"
+                )
+            for _pid, pg in payload.get("query", {}).get("pages", {}).items():
+                if not isinstance(pg, dict):
+                    continue
+                for c in pg.get("categories", []) or []:
+                    if isinstance(c, dict) and "title" in c:
+                        all_titles.append(str(c["title"]))
+            cont = payload.get("continue")
+            if not cont:
+                break
+            params.update(cont)
+        titles = sorted(set(all_titles))
         self._cache.set(key, json.dumps(titles).encode())
         return titles
 
@@ -457,7 +451,8 @@ class WikipediaClient:
             data = json.loads(cached)
             return list(data)
 
-        params = {
+        all_titles: list[str] = []
+        params: dict[str, str] = {
             "action": "query",
             "format": "json",
             "redirects": "1",
@@ -466,25 +461,29 @@ class WikipediaClient:
             "plnamespace": "0",
             "pllimit": "500",
         }
-        url = _mediawiki_api_url(self._base, lang, params)
-        cm = ctx.phase("mediawiki_links") if ctx else nullcontext()
-        with cm:
-            data_bytes, _ = _http_get(
-                url, self._config, ctx, error_collector=self._error_collector
-            )
-        payload = json.loads(data_bytes)
-        if "error" in payload:
-            raise WikipediaError(
-                f"MediaWiki API error: {payload.get('error', {})}"
-            )
-        titles: list[str] = []
-        for _pid, pg in payload.get("query", {}).get("pages", {}).items():
-            if not isinstance(pg, dict):
-                continue
-            for ln in pg.get("links", []) or []:
-                if isinstance(ln, dict) and "title" in ln:
-                    titles.append(str(ln["title"]))
-        titles = sorted(set(titles))
+        while True:
+            url = _mediawiki_api_url(self._base, lang, params)
+            cm = ctx.phase("mediawiki_links") if ctx else nullcontext()
+            with cm:
+                data_bytes, _ = _http_get(
+                    url, self._config, ctx, error_collector=self._error_collector
+                )
+            payload = json.loads(data_bytes)
+            if "error" in payload:
+                raise WikipediaError(
+                    f"MediaWiki API error: {payload.get('error', {})}"
+                )
+            for _pid, pg in payload.get("query", {}).get("pages", {}).items():
+                if not isinstance(pg, dict):
+                    continue
+                for ln in pg.get("links", []) or []:
+                    if isinstance(ln, dict) and "title" in ln:
+                        all_titles.append(str(ln["title"]))
+            cont = payload.get("continue")
+            if not cont:
+                break
+            params.update(cont)
+        titles = sorted(set(all_titles))
         self._cache.set(key, json.dumps(titles).encode())
         return titles
 
