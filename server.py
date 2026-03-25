@@ -3,14 +3,20 @@
 from __future__ import annotations
 
 import asyncio
+import hmac
 import json
+import os
 import queue
 import time
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
+from starlette.responses import JSONResponse, Response
 
 from wikifs import __version__, create_interpreter_with_components
 from wikifs.agent import AgentEvent, run_agent_streaming
@@ -19,6 +25,58 @@ from wikifs.models import CommandResponse
 from wikifs.tracing import TraceStats
 
 MAX_BATCH_COMMANDS = 50
+
+
+def _expected_api_key() -> str | None:
+    """Return configured API key, or None if auth is disabled."""
+    key = os.environ.get("WIKIFS_API_KEY", "").strip()
+    return key or None
+
+
+def _extract_request_api_key(request: Request) -> str | None:
+    """Read API key from X-API-Key or Authorization: Bearer."""
+    raw = request.headers.get("x-api-key")
+    if raw and raw.strip():
+        return raw.strip()
+    auth = request.headers.get("authorization")
+    if auth and auth.lower().startswith("bearer "):
+        token = auth[7:].strip()
+        if token:
+            return token
+    return None
+
+
+def _api_key_auth_exempt(request: Request) -> bool:
+    """Routes that stay public when WIKIFS_API_KEY is set."""
+    if request.method == "OPTIONS":
+        return True
+    path = request.url.path.rstrip("/") or "/"
+    return request.method == "GET" and path == "/health"
+
+
+class APIKeyMiddleware(BaseHTTPMiddleware):
+    """Optional shared-secret check when WIKIFS_API_KEY is set."""
+
+    async def dispatch(
+        self,
+        request: Request,
+        call_next: Callable[[Request], Awaitable[Response]],
+    ) -> Response:
+        expected = _expected_api_key()
+        if expected is None or _api_key_auth_exempt(request):
+            return await call_next(request)
+        got = _extract_request_api_key(request)
+        exp_b = expected.encode("utf-8")
+        got_b = got.encode("utf-8") if got is not None else b""
+        if got is None or len(got_b) != len(exp_b) or not hmac.compare_digest(
+            got_b, exp_b
+        ):
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "Invalid or missing API key"},
+            )
+        return await call_next(request)
+
 
 app = FastAPI(title="WikiFS HTTP API", version=__version__)
 
@@ -30,6 +88,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.add_middleware(APIKeyMiddleware)
 
 # Lazy init: same as CLI — Config → Cache → Tracing → Backends → Router → Interpreter
 _server_ctx: Any = None

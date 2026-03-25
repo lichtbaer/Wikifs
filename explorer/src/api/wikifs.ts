@@ -2,6 +2,16 @@ import type { CommandResponse, Stats } from "../types";
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? "http://localhost:8000";
 
+const API_KEY_HEADERS: Record<string, string> = {};
+{
+  const k = import.meta.env.VITE_WIKIFS_API_KEY?.trim();
+  if (k) API_KEY_HEADERS["X-API-Key"] = k;
+}
+
+function jsonHeaders(): HeadersInit {
+  return { "Content-Type": "application/json", ...API_KEY_HEADERS };
+}
+
 export async function executeCommand(
   body: {
     command: string;
@@ -24,7 +34,7 @@ export async function executeCommand(
   }
   const res = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: jsonHeaders(),
     body: JSON.stringify(payload),
   });
   if (!res.ok) {
@@ -34,7 +44,7 @@ export async function executeCommand(
 }
 
 export async function fetchStats(): Promise<Stats> {
-  const res = await fetch(`${API_BASE}/stats`);
+  const res = await fetch(`${API_BASE}/stats`, { headers: API_KEY_HEADERS });
   if (!res.ok) {
     throw new Error(`HTTP ${res.status}: ${res.statusText}`);
   }
@@ -69,7 +79,9 @@ export interface ErrorListItem {
 }
 
 export async function fetchTraces(limit = 25): Promise<TraceListItem[]> {
-  const res = await fetch(`${API_BASE}/traces?limit=${limit}`);
+  const res = await fetch(`${API_BASE}/traces?limit=${limit}`, {
+    headers: API_KEY_HEADERS,
+  });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const data = (await res.json()) as Array<{
     trace_id: string;
@@ -90,7 +102,9 @@ export async function fetchTraces(limit = 25): Promise<TraceListItem[]> {
 }
 
 export async function fetchErrors(limit = 25): Promise<ErrorListItem[]> {
-  const res = await fetch(`${API_BASE}/errors?limit=${limit}`);
+  const res = await fetch(`${API_BASE}/errors?limit=${limit}`, {
+    headers: API_KEY_HEADERS,
+  });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const data = (await res.json()) as Array<{
     error_id: string;
@@ -111,7 +125,10 @@ export async function fetchErrors(limit = 25): Promise<ErrorListItem[]> {
 }
 
 export async function clearServerCache(): Promise<number> {
-  const res = await fetch(`${API_BASE}/cache`, { method: "DELETE" });
+  const res = await fetch(`${API_BASE}/cache`, {
+    method: "DELETE",
+    headers: API_KEY_HEADERS,
+  });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const data = (await res.json()) as { deleted: number };
   return data.deleted;
@@ -127,7 +144,7 @@ export async function agentStream(
 ): Promise<void> {
   const res = await fetch(`${API_BASE}/agent/stream`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: jsonHeaders(),
     body: JSON.stringify({ query, model }),
   });
   if (!res.ok) {

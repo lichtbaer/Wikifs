@@ -40,6 +40,56 @@ def test_health_returns_ok_and_version() -> None:
     assert data["version"] == "0.1.0"
 
 
+def test_health_ok_without_key_when_wikifs_api_key_set(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """GET /health stays public when WIKIFS_API_KEY is configured."""
+    monkeypatch.setenv("WIKIFS_API_KEY", "secret-for-tests")
+    with TestClient(app) as c:
+        r = c.get("/health")
+    assert r.status_code == 200
+
+
+def test_execute_returns_401_without_key_when_wikifs_api_key_set(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """POST /execute requires API key when WIKIFS_API_KEY is set."""
+    monkeypatch.setenv("WIKIFS_API_KEY", "secret-for-tests")
+    with TestClient(app) as c:
+        r = c.post(
+            "/execute",
+            json={"command": "ls", "path": "/wiki/classes/", "flags": []},
+        )
+    assert r.status_code == 401
+    assert r.json()["detail"] == "Invalid or missing API key"
+
+
+def test_execute_with_x_api_key_succeeds(
+    monkeypatch: pytest.MonkeyPatch, temp_config: Path
+) -> None:
+    """Valid X-API-Key header allows access when WIKIFS_API_KEY is set."""
+    monkeypatch.setenv("WIKIFS_API_KEY", "secret-for-tests")
+    import server as server_module
+
+    server_module._server_ctx = None
+    from wikifs import create_interpreter_with_components
+
+    server_module._server_ctx = create_interpreter_with_components(str(temp_config))
+
+    with TestClient(app) as c:
+        r = c.post(
+            "/execute",
+            headers={"X-API-Key": "secret-for-tests"},
+            json={
+                "command": "ls",
+                "path": "/wiki/entities/Frankfurt_am_Main/",
+                "flags": [],
+            },
+        )
+    assert r.status_code == 200
+    assert r.json()["exit_code"] == 0
+
+
 def test_execute_valid_command_returns_command_response(temp_config: Path) -> None:
     """POST /execute with valid command returns CommandResponse as JSON."""
     import server as server_module
