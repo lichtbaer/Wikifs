@@ -120,7 +120,7 @@ Run API and Explorer in containers:
 docker compose up --build
 ```
 
-Then open [http://localhost:8080](http://localhost:8080). The Explorer UI is served by Nginx and proxies `/api` to the FastAPI backend. Cache and trace data are stored in a Docker volume (`wikifs_data`). For the agent to work, copy `.env.example` to `.env` and set e.g. `OPENAI_API_KEY`. To use a custom config, set `WIKIFS_DATA_DIR=/data` (default) and optionally mount `config.docker.toml` as the config file; the image uses `WIKIFS_DATA_DIR` to place SQLite DBs under `/data`.
+Then open [http://localhost:8080](http://localhost:8080). The Explorer UI is served by Nginx and proxies `/api` to the FastAPI backend. Cache and trace data are stored in a Docker volume (`wikifs_data`). For the agent to work, copy `.env.example` to `.env` and set e.g. `OPENAI_API_KEY`. Optional: set **`WIKIFS_API_KEY`** in `.env` to require an API key for all routes except `GET /health` (the Compose `env_file` passes it into the API container). Der mitgelieferte Explorer-Container leitet diesen Header nicht automatisch an `/api` weiter; für geschützte Deployments den Proxy so konfigurieren, dass `X-API-Key` (oder ein internes Secret) an das Backend gesendet wird, oder die API nur im vertrauenswürdigen Netz erreichbar machen. To use a custom config, set `WIKIFS_DATA_DIR=/data` (default) and optionally mount `config.docker.toml` as the config file; the image uses `WIKIFS_DATA_DIR` to place SQLite DBs under `/data`.
 
 ## Development
 
@@ -132,4 +132,10 @@ pytest
 
 ## License
 
-MIT
+Apache-2.0 (siehe [LICENSE](LICENSE)).
+
+## HTTP-API-Absicherung (optional)
+
+Wenn die Umgebungsvariable **`WIKIFS_API_KEY`** gesetzt ist (nicht leer), verlangt die API bei allen Routen außer **`GET /health`** und **`OPTIONS`** (CORS-Preflight) einen gültigen Schlüssel im Header **`X-API-Key`** oder als **`Authorization: Bearer <Schlüssel>`**.
+
+Lokal ohne gesetzte Variable bleibt die API wie bisher ungeschützt (nur für vertrauenswürdige Netze gedacht). Für den Explorer im Entwicklungsmodus kann optional **`VITE_WIKIFS_API_KEY`** gesetzt werden (landet im Browser-Bundle — nur für lokale Tests geeignet).
